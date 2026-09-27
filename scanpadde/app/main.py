@@ -16,6 +16,7 @@ from .storage import cleanup_temps, process_lock
 from .config import load_ocr_config
 from .remote_ocr import RemoteOcrClient, RemoteOcrError
 from .segmentation import reprocess_source, group_detail, override
+from .handoff import export_handoff, import_handoff
 
 ASSETS = Path(__file__).parent
 
@@ -35,6 +36,7 @@ class Runtime:
 
     def start(self, background=True):
         self.paths.initialize()
+        import_handoff(self.paths, self.paths.data)
         self.ocr_config = load_ocr_config(self.paths.data)
         self.lock = process_lock(self.paths.data)
         self.lock.__enter__()
@@ -274,6 +276,13 @@ def create_app(paths=None, background=True, allow_test_client=False):
     def job_list(limit: int = 100, offset: int = 0):
         return rows("SELECT * FROM jobs ORDER BY id DESC LIMIT ? OFFSET ?",
                     (max(1, min(limit, 500)), max(0, offset)))
+
+    @app.post("/api/migration/export")
+    def migration_export():
+        try:
+            return export_handoff(runtime.paths, runtime.paths.data)
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc))
 
     @app.get("/static/style.css")
     def style():

@@ -1,5 +1,5 @@
 FROM ghcr.io/home-assistant/base-python:3.12-alpine3.23@sha256:805c2c1ec95ab16cbc1a250bbcaed271f732c02d14cf3b51f3706444e603ad32
-LABEL io.hass.version="0.1.3" io.hass.type="app" io.hass.arch="amd64"
+LABEL io.hass.version="0.1.4" io.hass.type="app" io.hass.arch="amd64"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /opt/scanpadde
 COPY requirements.txt ./

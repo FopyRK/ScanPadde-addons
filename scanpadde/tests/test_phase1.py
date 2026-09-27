@@ -14,8 +14,9 @@ from app.db import connect, initialize, transaction
 from app.formats import inspect, InvalidFile
 from app.ingestion import observe, execute
 from app.main import create_app, Runtime
-from app.paths import UnsafePath
+from app.paths import Paths, UnsafePath
 from app.storage import archive, sha, SourceChanged, IntegrityError, process_lock, cleanup_temps
+from app.handoff import export_handoff, import_handoff
 
 def fixture_file(paths, name="test.pdf", pages=1, color="white"):
     p = paths.guard("inbox/" + name)
@@ -78,6 +79,31 @@ def test_duplicate_and_rename(env):
     assert len(list(paths.guard("originals").iterdir())) == 1
     assert db.execute("SELECT count(*) FROM inbox_entries WHERE state='processed'").fetchone()[0] == 2
     assert len(list(paths.guard("inbox").iterdir())) == 2
+
+def test_local_handoff_preserves_database_and_options(tmp_path):
+    source_paths = Paths(tmp_path / "share/scanpadde", tmp_path / "source-data")
+    source_paths.initialize()
+    initialize(source_paths.data / "scanpadde.db")
+    with connect(source_paths.data / "scanpadde.db") as db:
+        db.execute("INSERT INTO inbox_entries(relative_path,size_bytes,mtime_ns,first_seen_at,stable_since,last_seen_at,state) VALUES(?,?,?,?,?,?,?)",
+                   ("inbox/example.pdf", 1, 1, 1, 1, 1, "processed"))
+    source_config = tmp_path / "source-config"
+    source_config.mkdir()
+    (source_config / "worker-ca.crt").write_text("test-ca", encoding="utf-8")
+    (source_paths.data / "options.json").write_text(json.dumps({
+        "ocr_backend": "remote", "ocr_worker_url": "https://worker.invalid",
+        "ocr_worker_ca": "worker-ca.crt", "ocr_worker_token": "secret-not-logged"}), encoding="utf-8")
+    result = export_handoff(source_paths, source_paths.data, source_config)
+    assert result == {"ok": True, "snapshot": True, "options": True, "ca": True}
+
+    target_data = tmp_path / "target-data"
+    target_config = tmp_path / "target-config"
+    assert import_handoff(source_paths, target_data, target_config) is True
+    with connect(target_data / "scanpadde.db") as db:
+        assert db.execute("SELECT count(*) FROM inbox_entries").fetchone()[0] == 1
+    assert (target_data / "options.json").is_file()
+    assert (target_config / "scanpadde-ocr-ca.crt").read_text(encoding="utf-8") == "test-ca"
+    assert import_handoff(source_paths, target_data, target_config) is False
 
 def test_same_name_changed_content(env):
     paths, db = env
