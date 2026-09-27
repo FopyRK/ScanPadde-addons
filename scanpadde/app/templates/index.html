@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ScanPadde V2</title><link rel="stylesheet" href="static/style.css"></head>
+<body><main><p class="tag">PHASE 1A · STRUKTURELLE AUFNAHME</p>
+<h1>ScanPadde <small>{{version}}</small></h1><p>{{health}}</p>
+<section><h2>Inbox</h2><p>{{inbox}}</p><p>Dateien bleiben im Eingang. 15 Sekunden unveränderte Größe und Änderungszeit sind kein garantiertes Scanner-Fertig-Signal.</p></section>
+<section><h2>Jobs</h2><p>{{jobs}}</p></section>
+<section><h2>Quellen &amp; Review</h2><p>Die neuesten 100 Quellen. Nach abgeschlossener OCR öffnet „Analyse &amp; Review“ die vorgeschlagenen Dokumentgruppen. Dort lassen sich Seitenbereiche, erkannte Metadaten und Konflikte prüfen und bei Bedarf korrigieren. Originalseiten werden nie gelöscht oder automatisch exportiert.</p>
+<div class="scroll"><table><thead><tr><th>ID</th><th>Originalname</th><th>SHA-256</th><th>Seiten</th><th>Status</th><th>OCR-Fortschritt</th><th>Erfasst</th><th>Aktion</th></tr></thead>
+<tbody>{{sources}}</tbody></table></div></section>
+<p><a href="./">Aktualisieren</a> · <a href="api/health">Health</a> · <a href="api/status">Status</a></p>
+</main></body></html>

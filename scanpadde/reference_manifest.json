@@ -1,0 +1,20 @@
+{
+  "version": "phase3-synthetic-v1", "synthetic": true,
+  "stacks": [
+    {"id":"s01","groups":[[1],[2]],"pages":[{"supplier":"Alpha GmbH","invoice_number":"A-1","document_type":"invoice"},{"supplier":"Beta GmbH","invoice_number":"B-1","document_type":"invoice"}]},
+    {"id":"s02","groups":[[1,2],[3]],"pages":[{"supplier":"Alpha GmbH","invoice_number":"A-2","page":"1 von 2"},{"supplier":"Alpha GmbH","invoice_number":"A-2","page":"2 von 2"},{"supplier":"Alpha GmbH","invoice_number":"A-3"}]},
+    {"id":"s03","groups":[[1,2,3]],"pages":[{"supplier":"Gamma GmbH","invoice_number":"G-1","page":"1 von 3"},{"supplier":"Gamma GmbH","invoice_number":"G-1","page":"2 von 3"},{"supplier":"Gamma GmbH","invoice_number":"G-1","page":"3 von 3"}]},
+    {"id":"s04","groups":[[1],[2]],"pages":[{"supplier":"Delta GmbH","invoice_number":"D-1"},{"supplier":"Epsilon GmbH","invoice_number":"E-1"}]},
+    {"id":"s05","groups":[[1,2]],"pages":[{"supplier":"Zeta GmbH","invoice_number":"Z-1"},{"supplier":"Zeta GmbH","invoice_number":"Z-1"}]},
+    {"id":"s06","groups":[[1,2,3]],"pages":[{"supplier":"Eta GmbH","invoice_number":"E-6"},{"blank":true},{"supplier":"Theta GmbH","invoice_number":"T-6"}]},
+    {"id":"s07","groups":[[1,2]],"pages":[{"supplier":"Iota GmbH","invoice_number":"I-7","document_type":"invoice"},{"supplier":"Iota GmbH","invoice_number":"I-7","document_type":"invoice"}]},
+    {"id":"s08","groups":[[1],[2]],"pages":[{"supplier":"Kappa GmbH","invoice_number":"K-8","document_type":"credit_note"},{"supplier":"Lambda GmbH","invoice_number":"L-8","document_type":"invoice"}]},
+    {"id":"s09","groups":[[1],[2]],"pages":[{"supplier":"Mu GmbH","invoice_number":"M-9","document_type":"delivery_note"},{"supplier":"Nu GmbH","invoice_number":"N-9","document_type":"invoice"}]},
+    {"id":"s10","groups":[[1],[2]],"pages":[{"supplier":"Xi GmbH","invoice_number":"X-10"},{"supplier":"Omicron GmbH","invoice_number":"O-10"}]},
+    {"id":"s11","groups":[[1,2]],"conflict_boundaries":[1],"pages":[{"supplier":"Pi GmbH","invoice_number":"P-11","page":"1 von 2"},{"supplier":"Pi GmbH","invoice_number":"P-12","page":"2 von 2"}]},
+    {"id":"s12","groups":[[1],[2]],"pages":[{"supplier":"Rho GmbH","invoice_number":"R-12"},{"supplier":"Sigma GmbH","invoice_number":"S-12"}]},
+    {"id":"s13","groups":[[1,2]],"pages":[{"supplier":"Tau GmbH","invoice_number":"T-13"},{"supplier":"Tau GmbH","invoice_number":"T-13"}]},
+    {"id":"s14","groups":[[1],[2]],"pages":[{"supplier":"Upsilon GmbH","invoice_number":"U-14"},{"supplier":"Phi GmbH","invoice_number":"P-14"}]},
+    {"id":"s15","groups":[[1,2]],"pages":[{"supplier":"Chi GmbH","invoice_number":"C-15"},{"supplier":"Chi GmbH","invoice_number":"C-15"}]}
+  ]
+}

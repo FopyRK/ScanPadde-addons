@@ -1,0 +1,43 @@
+{
+  "version": "phase3-real-reference-v1",
+  "local_only": true,
+  "stacks": [
+    {
+      "id": "R01",
+      "source": "local-archive-source-identifier",
+      "pages": 5,
+      "ground_truth_confirmed": false,
+      "groups": [
+        {
+          "pages": [1, 2],
+          "supplier": "Supplier A",
+          "invoice_number": "Invoice A1",
+          "document_type": "invoice",
+          "date": null,
+          "gross_amount": null,
+          "notes": "Manually determined; replace all example values locally."
+        },
+        {
+          "pages": [3],
+          "supplier": "Supplier A",
+          "invoice_number": null,
+          "document_type": "delivery_note",
+          "date": null,
+          "gross_amount": null,
+          "notes": ""
+        },
+        {
+          "pages": [4, 5],
+          "supplier": "Supplier B",
+          "invoice_number": "Invoice B1",
+          "document_type": "invoice",
+          "date": null,
+          "gross_amount": null,
+          "notes": ""
+        }
+      ],
+      "hard_conflict_boundaries": [2],
+      "review_notes": ""
+    }
+  ]
+}
