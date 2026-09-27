@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.5 — 2026-09-27
+
+- Fix review-page asset and API paths under Home Assistant Ingress.
+
 ## 0.1.4 — 2026-09-27
 
 - Add a local, one-time Home Assistant release hand-off for the database, OCR cache and remote-OCR configuration.
