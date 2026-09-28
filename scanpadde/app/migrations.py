@@ -75,12 +75,19 @@ CREATE TABLE drive_entries (
  created_at REAL NOT NULL, updated_at REAL NOT NULL
 );
 CREATE INDEX drive_entries_source ON drive_entries(source_file_id,state);
-PRAGMA user_version=8;
+CREATE TABLE learning_rule_events (
+ id INTEGER PRIMARY KEY,
+ action TEXT NOT NULL CHECK(action IN ('removed','reset')),
+ rule_id INTEGER,
+ field TEXT,
+ created_at REAL NOT NULL
+);
+PRAGMA user_version=9;
 """
 
 def migrate(conn):
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version > 8:
+    if version > 9:
         raise RuntimeError("future_schema_rejected")
     if version == 0:
         conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nCOMMIT;")
@@ -214,4 +221,17 @@ def migrate(conn):
         );
         CREATE INDEX drive_entries_source ON drive_entries(source_file_id,state);
         PRAGMA user_version=8;
+        COMMIT;""")
+    elif version == 8:
+        # The learning library keeps its own minimal audit trail.  It records
+        # only rule identifiers and fields, never document or OCR text.
+        conn.executescript("""BEGIN IMMEDIATE;
+        CREATE TABLE learning_rule_events (
+          id INTEGER PRIMARY KEY,
+          action TEXT NOT NULL CHECK(action IN ('removed','reset')),
+          rule_id INTEGER,
+          field TEXT,
+          created_at REAL NOT NULL
+        );
+        PRAGMA user_version=9;
         COMMIT;""")

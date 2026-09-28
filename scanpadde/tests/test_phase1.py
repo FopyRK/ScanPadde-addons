@@ -311,7 +311,7 @@ def test_db_migration_fk_unique_and_persistence(env):
     paths, db = env
     fixture_file(paths)
     intake(paths, db)
-    assert db.execute("PRAGMA user_version").fetchone()[0] == 8
+    assert db.execute("PRAGMA user_version").fetchone()[0] == 9
     assert db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     with pytest.raises(sqlite3.IntegrityError):
         db.execute("INSERT INTO pages(source_file_id,page_number,created_at) VALUES(999,1,0)")
@@ -391,6 +391,21 @@ def test_health_status_sources_jobs_and_ingress(env):
             assert client.get("/api/health").json()["database"] == "unavailable"
     with TestClient(create_app(paths,background=False),client=("127.0.0.1",1234)) as client:
         assert client.get("/api/health",headers={"X-Forwarded-For":"172.30.32.2"}).status_code == 403
+
+def test_learning_library_lists_and_removes_only_local_rules(env):
+    paths, db = env
+    db.execute("""INSERT INTO learned_metadata_rules(field,normalized,value,source_group_id,created_at)
+                  VALUES(?,?,?,?,?)""", ("supplier", "BEISPIEL LIEFERANT", "Beispiel Lieferant", None, time.time()))
+    with TestClient(create_app(paths, background=False), client=("172.30.32.2", 1)) as client:
+        rules = client.get("/api/learning-library").json()
+        assert len(rules) == 1
+        assert rules[0]["field"] == "supplier"
+        assert "text" not in rules[0]
+        assert client.delete(f"/api/learning-library/{rules[0]['id']}").json() == {"ok": True}
+        assert client.get("/api/learning-library").json() == []
+        assert client.post("/api/learning-library/reset", json={}).status_code == 422
+        assert client.post("/api/learning-library/reset", json={"confirm": True}).json() == {"ok": True, "removed": 0}
+    assert db.execute("SELECT action,field FROM learning_rule_events ORDER BY id").fetchall()[0][0] == "removed"
 
 def test_html_escapes_filename(env):
     paths, db=env

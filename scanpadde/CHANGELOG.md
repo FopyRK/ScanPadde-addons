@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.32 — 2026-09-28
+
+- Add a local, manageable learning library for confirmed supplier aliases and invoice-label patterns. Rules are promoted on approval and can be removed individually or reset without changing documents, OCR, or exports.
+
 ## 0.1.31 — 2026-09-28
 
 - Keep the reviewer at the current position after edits, move approved groups below pending work, and add a persistent “Zur Übersicht” link at the top of the review page.

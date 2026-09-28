@@ -130,13 +130,17 @@ def test_group_detail_suggests_metadata_found_on_a_later_page(env):
     assert detail['metadata_json']['supplier']['effective_value']['value'] == 'ACME GmbH'
     assert detail['metadata_json']['invoice_number']['effective_value']['normalized'] == 'AB123'
 
-def test_confirmed_metadata_creates_local_reusable_rules(env):
+def test_approved_metadata_creates_local_reusable_rules(env):
     _, db = env
     first = source(db, 1)
     page(db, first, 1, 'My Supplier\nVorgangsnummer: ZX-99')
     group = reprocess_source(db, first)[0]
     override(db, first, 'metadata', {'group_id': group, 'field': 'supplier', 'value': 'My Supplier'})
     override(db, first, 'metadata', {'group_id': group, 'field': 'invoice_number', 'value': 'ZX-99'})
+    # Editing a field alone is intentionally not learning.  The reviewer must
+    # release the group before its local pattern can influence later scans.
+    assert db.execute("SELECT count(*) FROM learned_metadata_rules").fetchone()[0] == 0
+    override(db, first, 'approve', {'group_id': group})
     learned = db.execute("SELECT field,value FROM learned_metadata_rules ORDER BY field").fetchall()
     assert [(row['field'], row['value']) for row in learned] == [('invoice_label', 'Vorgangsnummer'), ('supplier', 'My Supplier')]
     later = source(db, 1)

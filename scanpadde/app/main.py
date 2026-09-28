@@ -388,6 +388,37 @@ def create_app(paths=None, background=True, allow_test_client=False):
         return rows("SELECT * FROM jobs ORDER BY id DESC LIMIT ? OFFSET ?",
                     (max(1, min(limit, 500)), max(0, offset)))
 
+    @app.get("/api/learning-library")
+    def learning_library():
+        """List only local learning metadata; no OCR or document text is returned."""
+        return rows("""SELECT r.id,r.field,r.value,r.created_at,r.source_group_id,
+                       CASE WHEN g.status='approved' THEN 1 ELSE 0 END AS source_is_approved
+                       FROM learned_metadata_rules r
+                       LEFT JOIN document_groups g ON g.id=r.source_group_id
+                       ORDER BY r.field,r.value COLLATE NOCASE,r.id""")
+
+    @app.delete("/api/learning-library/{rule_id}")
+    def remove_learning_rule(rule_id: int):
+        with connection(runtime.db_path) as db, transaction(db):
+            rule = db.execute("SELECT id,field FROM learned_metadata_rules WHERE id=?", (rule_id,)).fetchone()
+            if not rule:
+                raise HTTPException(404, "learning_rule_not_found")
+            db.execute("DELETE FROM learned_metadata_rules WHERE id=?", (rule_id,))
+            db.execute("INSERT INTO learning_rule_events(action,rule_id,field,created_at) VALUES(?,?,?,?)",
+                       ("removed", rule["id"], rule["field"], time.time()))
+        return {"ok": True}
+
+    @app.post("/api/learning-library/reset")
+    def reset_learning_library(payload: dict):
+        if payload.get("confirm") is not True:
+            raise HTTPException(422, "confirmation_required")
+        with connection(runtime.db_path) as db, transaction(db):
+            count = db.execute("SELECT count(*) FROM learned_metadata_rules").fetchone()[0]
+            db.execute("DELETE FROM learned_metadata_rules")
+            db.execute("INSERT INTO learning_rule_events(action,rule_id,field,created_at) VALUES(?,?,?,?)",
+                       ("reset", None, None, time.time()))
+        return {"ok": True, "removed": count}
+
     @app.post("/api/migration/export")
     def migration_export():
         try:
@@ -404,6 +435,9 @@ def create_app(paths=None, background=True, allow_test_client=False):
 
     @app.get("/static/ollama.js")
     def ollama_js(): return FileResponse(ASSETS / "static/ollama.js", media_type="application/javascript")
+
+    @app.get("/static/learning.js")
+    def learning_js(): return FileResponse(ASSETS / "static/learning.js", media_type="application/javascript")
 
     @app.get("/review/{source_id}", response_class=HTMLResponse)
     def review(source_id: int):

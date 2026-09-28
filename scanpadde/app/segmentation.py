@@ -44,7 +44,8 @@ def _remember_invoice_label(db, group_id, value):
         start = marker - 1 if marker and is_short_marker else marker
         label = " ".join(words[start:])
         db.execute("""INSERT INTO learned_metadata_rules(field,normalized,value,source_group_id,created_at)
-            VALUES(?,?,?,?,?) ON CONFLICT(field,normalized) DO NOTHING""",
+            VALUES(?,?,?,?,?) ON CONFLICT(field,normalized) DO UPDATE SET
+            source_group_id=excluded.source_group_id, created_at=excluded.created_at""",
                    ("invoice_label", _norm_rule(label), label, group_id, time.time()))
         return
 
@@ -226,6 +227,20 @@ def group_display_name(metadata):
     item = metadata.get("display_name") or _display_name(metadata)
     return (item.get("human_value") or item.get("effective_value") or item.get("auto_value") or {}).get("value", "Unbenanntes Dokument")
 
+def _learn_from_approved_group(db, group):
+    """Promote only explicitly confirmed metadata into reusable local rules."""
+    metadata = json.loads(group["metadata_json"] or "{}")
+    supplier = (metadata.get("supplier") or {}).get("human_value") or {}
+    supplier_value = str(supplier.get("value") or "").strip()
+    if supplier_value:
+        db.execute("""INSERT INTO learned_metadata_rules(field,normalized,value,source_group_id,created_at)
+            VALUES(?,?,?,?,?) ON CONFLICT(field,normalized) DO UPDATE SET
+            source_group_id=excluded.source_group_id, created_at=excluded.created_at""",
+                   ("supplier", _norm_rule(supplier_value), supplier_value, group["id"], time.time()))
+    invoice = (metadata.get("invoice_number") or {}).get("human_value") or {}
+    if invoice.get("value"):
+        _remember_invoice_label(db, group["id"], invoice["value"])
+
 def reprocess_source(db, source_id):
     # A human intervention (including approval) is authoritative. Retain the
     # auditable grouping until a reviewer deliberately changes it again.
@@ -338,14 +353,12 @@ def override(db, source_id, action, payload):
             if field not in m: raise ValueError("metadata_field_invalid")
             m[field]["human_value"]={"value":payload["value"],"source":"human_override"}; m[field]["effective_value"]=m[field]["human_value"]
             db.execute("UPDATE document_groups SET metadata_json=?,status='review_required' WHERE id=?", (json.dumps(m),g["id"]))
-            if field == "supplier" and str(payload["value"]).strip():
-                supplier = str(payload["value"]).strip()
-                db.execute("""INSERT INTO learned_metadata_rules(field,normalized,value,source_group_id,created_at)
-                    VALUES(?,?,?,?,?) ON CONFLICT(field,normalized) DO NOTHING""",
-                           ("supplier", _norm_rule(supplier), supplier, g["id"], time.time()))
-            elif field == "invoice_number":
-                _remember_invoice_label(db, g["id"], payload["value"])
-        elif action == "approve": db.execute("UPDATE document_groups SET status='approved' WHERE id=? AND source_file_id=?", (payload["group_id"],source_id))
+        elif action == "approve":
+            group = db.execute("SELECT * FROM document_groups WHERE id=? AND source_file_id=?", (payload["group_id"], source_id)).fetchone()
+            if not group:
+                raise ValueError("group_not_found")
+            _learn_from_approved_group(db, group)
+            db.execute("UPDATE document_groups SET status='approved' WHERE id=?", (group["id"],))
         elif action == "needs_review": db.execute("UPDATE document_groups SET status='review_required' WHERE id=? AND source_file_id=?", (payload["group_id"],source_id))
         elif action == "split":
             g = db.execute("SELECT * FROM document_groups WHERE id=?", (payload["group_id"],)).fetchone()
