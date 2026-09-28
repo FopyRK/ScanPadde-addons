@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.31 — 2026-09-28
+
+- Keep the reviewer at the current position after edits, move approved groups below pending work, and add a persistent “Zur Übersicht” link at the top of the review page.
+
 ## 0.1.30 — 2026-09-28
 
 - Add a selectable, copyable local OCR-text panel for each review page, so a reviewer can copy a number or date directly into the metadata form without transcribing it from the image.

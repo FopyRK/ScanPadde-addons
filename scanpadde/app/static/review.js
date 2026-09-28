@@ -68,14 +68,16 @@
     return response.json();
   }
 
-  async function load() {
+  async function load(options = {}) {
     let groups = await fetch(`../api/sources/${id}/groups`).then(response => response.json());
     if (!groups.length || groups.some(group => group.algorithm_version !== 'phase3-segmentation-v3' && group.algorithm_version !== 'ollama-review-apply-v1')) {
       await call(`../api/sources/${id}/analyze`, 'POST', {});
       groups = await fetch(`../api/sources/${id}/groups`).then(response => response.json());
     }
     const evidence = await fetch(`../api/groups/${groups[0]?.id}/evidence`).then(response => response.ok ? response.json() : []);
-    state.textContent = `${groups.length} vorgeschlagene Gruppen`;
+    const pending = groups.filter(group => group.status !== 'approved').length;
+    const approved = groups.length - pending;
+    state.textContent = `${pending} zu prüfen · ${approved} freigegeben`;
     out.innerHTML = '';
     for (const group of groups) {
       const detail = await fetch(`../api/groups/${group.id}`).then(response => response.json());
@@ -84,6 +86,7 @@
       const card = document.createElement('section');
       card.className = 'group';
       card.dataset.groupId = group.id;
+      card.dataset.status = group.status;
       const pageCards = detail.pages.map(page => `<article class="page-card" data-page-id="${page.id}"><img class="thumbnail" src="../api/pages/${page.id}/thumbnail" alt="Vorschau Seite ${page.page_number}"><strong>Seite ${page.page_number}</strong><p class="ocr-snippet">OCR: ${esc((page.ocr_snippet || '').slice(0, 100))}</p><p class="page-controls"><button data-a="ocr-text" data-page-id="${page.id}">OCR-Text kopieren</button> <button data-a="reorder" data-page-id="${page.id}" data-direction="earlier">← Früher</button> <button data-a="reorder" data-page-id="${page.id}" data-direction="later">Später →</button> <button data-a="exclude" data-page-id="${page.id}">Leerseite ausblenden</button></p></article>`).join('');
       const boundaries = detail.pages.slice(0, -1).map(page => {
         const item = evidence.find(entry => entry.after_page_id === page.id);
@@ -101,9 +104,15 @@
           return;
         }
         try {
+          const scrollY = window.scrollY;
+          const nextReview = action === 'approve';
+          const nextGroupId = nextReview
+            ? groups.slice(groups.indexOf(group) + 1).find(item => item.status !== 'approved')?.id
+            : null;
           if (action === 'ocr-text') {
             const page = detail.pages.find(item => item.id === Number(event.target.dataset.pageId));
             if (page) await showOcrText(page);
+            return;
           } else if (action === 'approve' || action === 'review') {
             await call(`../api/sources/${id}/${action === 'approve' ? 'approve' : 'needs-review'}`, 'POST', {group_id: group.id});
           } else if (action === 'edit') {
@@ -129,12 +138,20 @@
               await call(`../api/sources/${id}/exclude-page`, 'POST', {group_id: group.id, page_id: Number(event.target.dataset.pageId)});
             }
           }
-          await load();
+          await load({scrollY, nextReview, nextGroupId});
         } catch (error) {
           alert(error.message);
         }
       };
       out.append(card);
+    }
+    if (options.nextReview) {
+      const next = (options.nextGroupId && out.querySelector(`.group[data-group-id="${options.nextGroupId}"]`))
+        || out.querySelector('.group:not([data-status="approved"])');
+      if (next) next.scrollIntoView({block: 'start'});
+      else window.scrollTo({top: options.scrollY ?? 0});
+    } else {
+      window.scrollTo({top: options.scrollY ?? window.scrollY});
     }
   }
   load().catch(error => state.textContent = `Prüfungsfehler: ${error.message}`);

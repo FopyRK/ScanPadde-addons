@@ -311,7 +311,8 @@ def create_app(paths=None, background=True, allow_test_client=False):
         return rows("""SELECT dg.* FROM document_groups dg LEFT JOIN group_pages gp ON gp.group_id=dg.id
                     LEFT JOIN pages p ON p.id=gp.page_id
                     WHERE dg.source_file_id=? AND dg.status NOT IN ('superseded','rejected')
-                    GROUP BY dg.id ORDER BY MIN(p.page_number), dg.id""", (source_id,))
+                    GROUP BY dg.id
+                    ORDER BY CASE WHEN dg.status='approved' THEN 1 ELSE 0 END, MIN(p.page_number), dg.id""", (source_id,))
 
     @app.get("/api/groups/{group_id}")
     def api_group(group_id: int):
