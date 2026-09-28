@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6 — 2026-09-28
+
+- Repair migration of a previously configured remote-OCR worker when Home Assistant has created only default release options.
+- Never overwrite an explicit release configuration.
+
 ## 0.1.5 — 2026-09-27
 
 - Fix review-page asset and API paths under Home Assistant Ingress.

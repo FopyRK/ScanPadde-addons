@@ -84,10 +84,15 @@ def export_handoff(paths, data_dir: Path, config_dir: Path = Path("/config")) ->
 
 
 def import_handoff(paths, data_dir: Path, config_dir: Path = Path("/config")) -> bool:
-    """Import one hand-off snapshot only into a fresh release add-on."""
+    """Import a local hand-off without replacing configured release data.
+
+    Home Assistant creates a default ``options.json`` for a newly installed
+    add-on before its first process starts.  That file must not prevent the
+    one-time migration of an already configured remote OCR worker.  A later
+    start may therefore repair *only* still-default options and a missing CA;
+    an explicit release configuration is never overwritten.
+    """
     destination = data_dir / SNAPSHOT_NAME
-    if destination.exists():
-        return False
     directory = paths.guard(HANDOFF_DIR)
     source = directory / SNAPSHOT_NAME
     marker = directory / "manifest.json"
@@ -100,16 +105,38 @@ def import_handoff(paths, data_dir: Path, config_dir: Path = Path("/config")) ->
     if manifest.get("format") != 1:
         return False
     data_dir.mkdir(parents=True, exist_ok=True)
-    _atomic_backup(source, destination)
+    copied = False
+    if not destination.exists():
+        _atomic_backup(source, destination)
+        copied = True
     options_source = directory / OPTIONS_NAME
-    if options_source.is_file():
+    options_destination = data_dir / OPTIONS_NAME
+    if options_source.is_file() and _has_default_ocr_options(options_destination):
         options_destination = data_dir / OPTIONS_NAME
         options_destination.write_bytes(options_source.read_bytes())
         os.chmod(options_destination, 0o600)
+        copied = True
     ca_source = directory / CA_NAME
-    if ca_source.is_file():
+    ca_destination = config_dir / CA_NAME
+    if ca_source.is_file() and not ca_destination.exists():
         config_dir.mkdir(parents=True, exist_ok=True)
-        ca_destination = config_dir / CA_NAME
         ca_destination.write_bytes(ca_source.read_bytes())
         os.chmod(ca_destination, 0o600)
-    return True
+        copied = True
+    return copied
+
+
+def _has_default_ocr_options(path: Path) -> bool:
+    """Return true only for Supervisor-created, unconfigured OCR options."""
+    if not path.exists():
+        return True
+    try:
+        values = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(values, dict):
+        return False
+    return (values.get("ocr_backend", "disabled") == "disabled"
+            and not values.get("ocr_worker_url", "")
+            and not values.get("ocr_worker_ca", "")
+            and not values.get("ocr_worker_token", ""))
