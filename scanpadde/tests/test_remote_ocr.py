@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 from PIL import Image
 from app.remote_ocr import RemoteOcrClient, RemoteRejected, RemoteUnavailable, ocr_key, validate_response
-from app.config import OcrConfig, load_ocr_config
+from app.config import OcrConfig, OllamaConfig, load_ocr_config, load_ollama_config
 from app import jobs
 from app.ingestion import execute
 from test_phase2_ocr import page_with_image
@@ -92,6 +92,17 @@ def test_client_rejects_plain_http_without_connecting():
 
 def test_ocr_configuration_defaults_to_disabled(tmp_path):
     assert load_ocr_config(tmp_path, tmp_path / "config") == OcrConfig()
+
+
+def test_ollama_configuration_is_opt_in_and_private_lan_only(tmp_path):
+    assert load_ollama_config(tmp_path) == OllamaConfig()
+    (tmp_path / "options.json").write_text(json.dumps({"ollama_enabled": True,
+        "ollama_url": "http://192.168.10.168:11434", "ollama_model": "qwen3"}))
+    config = load_ollama_config(tmp_path)
+    assert config.enabled and config.url == "http://192.168.10.168:11434" and config.model == "qwen3"
+    (tmp_path / "options.json").write_text(json.dumps({"ollama_enabled": True,
+        "ollama_url": "https://example.com:11434", "ollama_model": "qwen3"}))
+    assert load_ollama_config(tmp_path) == OllamaConfig()
 
 
 def test_remote_configuration_requires_https_token_and_explicit_ca(tmp_path):

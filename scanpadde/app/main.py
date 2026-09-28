@@ -9,11 +9,13 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
 from . import VERSION, jobs
-from .db import connection, initialize
+from .db import connection, initialize, transaction
 from .ingestion import observe, execute
 from .paths import Paths
 from .storage import cleanup_temps, process_lock
-from .config import load_ocr_config
+from .config import load_ocr_config, load_ollama_config
+from .features import extract
+from .ollama import OllamaClient, OllamaError
 from .remote_ocr import RemoteOcrClient, RemoteOcrError
 from .segmentation import reprocess_source, group_detail, override
 from .handoff import export_handoff, import_handoff
@@ -30,6 +32,7 @@ class Runtime:
         self.last_tick = None
         self.lock = None
         self.ocr_config = load_ocr_config(paths.data)
+        self.ollama_config = load_ollama_config(paths.data)
         self.remote_status = {"configured": False, "backend": "disabled", "online": None,
                               "worker_version": None, "tesseract_version": None, "languages": None,
                               "last_successful_contact": None}
@@ -38,6 +41,7 @@ class Runtime:
         self.paths.initialize()
         import_handoff(self.paths, self.paths.data)
         self.ocr_config = load_ocr_config(self.paths.data)
+        self.ollama_config = load_ollama_config(self.paths.data)
         self.lock = process_lock(self.paths.data)
         self.lock.__enter__()
         try:
@@ -170,6 +174,8 @@ def create_app(paths=None, background=True, allow_test_client=False):
         return {"version": VERSION, **health(), "worker": runtime.state,
                 "worker_alive": bool(runtime.worker and runtime.worker.is_alive()),
                 "last_tick": runtime.last_tick,
+                "ollama": {"enabled": runtime.ollama_config.enabled,
+                           "model": runtime.ollama_config.model},
                 "remote_ocr": remote, "inbox": rows("SELECT state,count(*) AS count FROM inbox_entries GROUP BY state"),
                 "jobs": rows("SELECT state,count(*) AS count FROM jobs GROUP BY state")}
 
@@ -197,6 +203,49 @@ def create_app(paths=None, background=True, allow_test_client=False):
             raise HTTPException(404, "source_not_found")
         with connection(runtime.db_path) as db:
             return {"group_ids": reprocess_source(db, source_id)}
+
+    def ollama_pages(db, source_id):
+        page_rows = db.execute("""SELECT p.id,p.page_number,p.width,p.height,o.text,o.words_json
+                             FROM pages p JOIN ocr_results o ON o.id=(SELECT id FROM ocr_results
+                             WHERE page_id=p.id AND status='completed' ORDER BY created_at DESC LIMIT 1)
+                             WHERE p.source_file_id=? ORDER BY p.page_number""", (source_id,)).fetchall()
+        expected = db.execute("SELECT page_count FROM source_files WHERE id=?", (source_id,)).fetchone()
+        if not expected:
+            raise HTTPException(404, "source_not_found")
+        if len(page_rows) != expected["page_count"]:
+            raise HTTPException(409, "ocr_incomplete")
+        return [{"page_number": row["page_number"], "text": row["text"],
+                 "features": extract(row["text"], row["words_json"], row["width"], row["height"])} for row in page_rows]
+
+    @app.get("/api/sources/{source_id}/ollama-suggestion")
+    def ollama_suggestion(source_id: int):
+        if not rows("SELECT id FROM source_files WHERE id=?", (source_id,)):
+            raise HTTPException(404, "source_not_found")
+        found = rows("SELECT model,input_digest,suggestion_json,created_at FROM ollama_grouping_suggestions WHERE source_file_id=?", (source_id,))
+        if not found:
+            return {"available": False}
+        result = found[0]
+        return {"available": True, "model": result["model"], "created_at": result["created_at"],
+                "groups": json.loads(result["suggestion_json"])}
+
+    @app.post("/api/sources/{source_id}/ollama-analyze")
+    def ollama_analyze(source_id: int):
+        if not runtime.ollama_config.enabled:
+            raise HTTPException(409, "ollama_not_configured")
+        with connection(runtime.db_path) as db:
+            pages = ollama_pages(db, source_id)
+            try:
+                suggestion = OllamaClient(runtime.ollama_config).suggest_groups(pages)
+            except OllamaError as exc:
+                raise HTTPException(503 if str(exc) == "ollama_unavailable" else 422, str(exc))
+            with transaction(db):
+                db.execute("""INSERT INTO ollama_grouping_suggestions(source_file_id,model,input_digest,suggestion_json,created_at)
+                              VALUES(?,?,?,?,?) ON CONFLICT(source_file_id) DO UPDATE SET model=excluded.model,
+                              input_digest=excluded.input_digest,suggestion_json=excluded.suggestion_json,created_at=excluded.created_at""",
+                           (source_id, runtime.ollama_config.model, suggestion.input_digest,
+                            json.dumps(suggestion.groups), time.time()))
+            return {"groups": suggestion.groups, "model": runtime.ollama_config.model,
+                    "review_required": True}
 
     @app.post("/api/sources/{source_id}/retry-ocr")
     def retry_source_ocr(source_id: int):
@@ -320,6 +369,9 @@ def create_app(paths=None, background=True, allow_test_client=False):
 
     @app.get("/static/review.js")
     def review_js(): return FileResponse(ASSETS / "static/review.js", media_type="application/javascript")
+
+    @app.get("/static/ollama.js")
+    def ollama_js(): return FileResponse(ASSETS / "static/ollama.js", media_type="application/javascript")
 
     @app.get("/review/{source_id}", response_class=HTMLResponse)
     def review(source_id: int):

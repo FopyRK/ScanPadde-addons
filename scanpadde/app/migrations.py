@@ -50,12 +50,17 @@ CREATE TABLE boundary_evidence (source_file_id INTEGER NOT NULL REFERENCES sourc
 CREATE TABLE group_overrides (id INTEGER PRIMARY KEY, source_file_id INTEGER NOT NULL REFERENCES source_files(id), action TEXT NOT NULL CHECK(action IN ('split','merge','move_page','metadata','approve','needs_review')), payload_json TEXT NOT NULL, created_at REAL NOT NULL);
 CREATE INDEX group_pages_page ON group_pages(page_id);
 CREATE INDEX groups_source ON document_groups(source_file_id,revision DESC);
-PRAGMA user_version=3;
+CREATE TABLE ollama_grouping_suggestions (
+ source_file_id INTEGER PRIMARY KEY REFERENCES source_files(id),
+ model TEXT NOT NULL, input_digest TEXT NOT NULL, suggestion_json TEXT NOT NULL,
+ created_at REAL NOT NULL
+);
+PRAGMA user_version=4;
 """
 
 def migrate(conn):
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version > 3:
+    if version > 4:
         raise RuntimeError("future_schema_rejected")
     if version == 0:
         conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nCOMMIT;")
@@ -125,4 +130,13 @@ def migrate(conn):
         CREATE INDEX group_pages_page ON group_pages(page_id);
         CREATE INDEX groups_source ON document_groups(source_file_id, revision DESC);
         PRAGMA user_version=3;
+        COMMIT;""")
+    elif version == 3:
+        conn.executescript("""BEGIN IMMEDIATE;
+        CREATE TABLE ollama_grouping_suggestions (
+          source_file_id INTEGER PRIMARY KEY REFERENCES source_files(id),
+          model TEXT NOT NULL, input_digest TEXT NOT NULL, suggestion_json TEXT NOT NULL,
+          created_at REAL NOT NULL
+        );
+        PRAGMA user_version=4;
         COMMIT;""")

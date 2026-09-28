@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.11 — 2026-09-28
+
+- Add an optional, private-LAN Ollama review pass. It only proposes contiguous
+  page groups from existing OCR, stores no OCR text or model prose, and never
+  approves, exports, renames, or changes existing groups automatically.
+
 ## 0.1.10 — 2026-09-28
 
 - Add a remote-only, cache-aware “OCR nachholen” action for sources archived before OCR was configured.

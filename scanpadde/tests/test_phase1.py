@@ -277,7 +277,7 @@ def test_db_migration_fk_unique_and_persistence(env):
     paths, db = env
     fixture_file(paths)
     intake(paths, db)
-    assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert db.execute("PRAGMA user_version").fetchone()[0] == 4
     assert db.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
     with pytest.raises(sqlite3.IntegrityError):
         db.execute("INSERT INTO pages(source_file_id,page_number,created_at) VALUES(999,1,0)")

@@ -1,5 +1,5 @@
 name: ScanPadde V2
-version: "0.1.10"
+version: "0.1.11"
 slug: scanpadde_v2
 description: Local, persistent structural document intake. Experimental Phase 1A.
 arch:
@@ -27,8 +27,15 @@ options:
   # Relative to the Supervisor-provided /config mount; never an arbitrary host path.
   ocr_worker_ca: ""
   ocr_worker_token: ""
+  # Optional private-LAN Ollama endpoint for non-authoritative review suggestions.
+  ollama_enabled: false
+  ollama_url: ""
+  ollama_model: ""
 schema:
   ocr_backend: list(disabled|local|remote)
   ocr_worker_url: str?
   ocr_worker_ca: str?
   ocr_worker_token: password?
+  ollama_enabled: bool
+  ollama_url: str?
+  ollama_model: str?
