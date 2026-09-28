@@ -18,6 +18,13 @@ def test_model_groups_must_partition_contiguous_ordered_pages():
     assert _validate_groups({"groups": [{"pages": [1, 2], "confidence": "high", "reason": "same_document"}]}, [1, 2])[0]["pages"] == [1, 2]
     with pytest.raises(OllamaError):
         _validate_groups({"groups": [{"pages": [1]}, {"pages": [3]}]}, [1, 2, 3])
+
+
+def test_compact_start_pages_expand_to_contiguous_groups():
+    assert _validate_groups({"starts": [1, 3]}, [1, 2, 3, 4]) == [
+        {"pages": [1, 2], "confidence": "low", "reason": "uncertain"},
+        {"pages": [3, 4], "confidence": "low", "reason": "uncertain"},
+    ]
     with pytest.raises(OllamaError):
         _validate_groups({"groups": [{"pages": [1, 3]}, {"pages": [2]}]}, [1, 2, 3])
 
@@ -25,7 +32,7 @@ def test_model_groups_must_partition_contiguous_ordered_pages():
 def test_client_keeps_only_structured_groups_and_no_model_prose(monkeypatch):
     class Response:
         status = 200
-        def read(self, _): return json.dumps({"response": json.dumps({"groups": [{"pages": [1, 2], "confidence": "high", "reason": "same_document", "explanation": "never stored"}]})}).encode()
+        def read(self, _): return json.dumps({"response": json.dumps({"starts": [1]})}).encode()
     captured = {}
     class Connection:
         class Socket:
@@ -37,6 +44,5 @@ def test_client_keeps_only_structured_groups_and_no_model_prose(monkeypatch):
         def close(self): pass
     monkeypatch.setattr("app.ollama.http.client.HTTPConnection", Connection)
     result = OllamaClient(OllamaConfig(True, "http://192.168.10.168:11434", "qwen3")).suggest_groups(pages())
-    assert result.groups == [{"pages": [1, 2], "confidence": "high", "reason": "same_document"}]
-    assert "never stored" not in json.dumps(result.groups)
-    assert captured["body"]["options"]["num_predict"] == 128
+    assert result.groups == [{"pages": [1, 2], "confidence": "low", "reason": "uncertain"}]
+    assert captured["body"]["options"]["num_predict"] == 64

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.16 — 2026-09-28
+
+- Use a compact local-model start-page proposal built from extracted OCR
+  features, avoiding long OCR excerpts and verbose group JSON.
+
 ## 0.1.15 — 2026-09-28
 
 - Further compact the local Ollama page evidence and cap its structured response
