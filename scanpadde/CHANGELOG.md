@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.27 — 2026-09-28
+
+- Move fully processed inbox files into a local processed archive only after hash archival and complete OCR; incomplete and failed inputs remain in the inbox.
+
 ## 0.1.26 — 2026-09-28
 
 - Show each source's document names and review progress in the overview; generate readable names from document type, supplier, and invoice number, with an optional manual name override.

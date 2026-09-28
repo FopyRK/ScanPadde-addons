@@ -438,7 +438,7 @@ def create_app(paths=None, background=True, allow_test_client=False):
         template = (ASSETS / "templates/index.html").read_text(encoding="utf-8")
         return template.replace("{{version}}", VERSION).replace("{{health}}", escape(
             f"System: {s['app']} | Datenbank: {s['database']} | Arbeitsverzeichnis: {s['workspace']} | Worker: {s['worker']} | Remote OCR: {s['remote_ocr']['backend']} / {s['remote_ocr']['online']}")).replace(
-            "{{inbox}}", escape(f"Erkannt: {sum(counts.values())} | Wartet auf Stabilität: {counts.get('waiting',0)} | Verarbeitet: {counts.get('processed',0)} | Fehler: {counts.get('error',0)}")).replace(
+            "{{inbox}}", escape(f"Erkannt: {sum(counts.values())} | Wartet auf Stabilität: {counts.get('waiting',0)} | Verarbeitet: {counts.get('processed',0)} | Lokal archiviert: {counts.get('archived',0)} | Fehler: {counts.get('error',0)}")).replace(
             "{{jobs}}", escape(" | ".join(f"{k}: {queue.get(k,0)}" for k in ("pending","running","completed","failed")))).replace("{{sources}}", table)
 
     return app

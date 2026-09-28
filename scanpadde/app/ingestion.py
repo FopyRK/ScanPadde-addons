@@ -1,7 +1,8 @@
-"""Persistent observation and idempotent intake; inbox is read-only."""
+"""Persistent intake with a safe, local post-processing inbox archive."""
 import hashlib
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from . import jobs
@@ -14,6 +15,38 @@ from .ocr import ENGINE, PREPROCESSING_VERSION, embedded_text, engine_version, r
 from .remote_ocr import RemoteOcrClient, RemoteOcrError, ROTATION_POLICY_VERSION
 
 log = logging.getLogger("scanpadde")
+
+def archive_completed_inbox(db, paths):
+    """Move only fully OCR-complete inputs out of inbox after hash archival.
+
+    The canonical original has already been hash-archived.  This is a local
+    housekeeping move, never a delete; failed and incomplete inputs stay put.
+    """
+    entries = db.execute("""SELECT i.relative_path,i.generation,i.source_file_id,s.sha256,s.page_count
+        FROM inbox_entries i JOIN source_files s ON s.id=i.source_file_id
+        WHERE i.state='processed' AND s.status='ready'""").fetchall()
+    for entry in entries:
+        complete = db.execute("SELECT count(*) FROM pages WHERE source_file_id=? AND status='ocr_completed'",
+                              (entry["source_file_id"],)).fetchone()[0]
+        if complete != entry["page_count"]:
+            continue
+        try:
+            source = paths.source(entry["relative_path"])
+        except (OSError, UnsafePath):
+            continue
+        if sha(source) != entry["sha256"]:
+            continue
+        target_dir = paths.guard("processed")
+        base = f"{entry['sha256'][:12]}-{source.name}"
+        target = target_dir / base
+        suffix = 2
+        while target.exists():
+            target = target_dir / f"{entry['sha256'][:12]}-{suffix}-{source.name}"
+            suffix += 1
+        os.replace(source, target)
+        with transaction(db):
+            db.execute("UPDATE inbox_entries SET state='archived',last_error=NULL WHERE relative_path=? AND generation=?",
+                       (entry["relative_path"], entry["generation"]))
 
 def observe(db, paths, now=None):
     now = time.time() if now is None else now
@@ -40,7 +73,7 @@ def observe(db, paths, now=None):
                 db.execute("""INSERT INTO inbox_entries(relative_path,size_bytes,mtime_ns,
                     first_seen_at,stable_since,last_seen_at,state) VALUES (?,?,?,?,?,?,'waiting')""",
                     (relative, *sig, now, now, now))
-            elif (old["size_bytes"], old["mtime_ns"]) != sig or old["state"] in ("missing", "changed"):
+            elif (old["size_bytes"], old["mtime_ns"]) != sig or old["state"] in ("missing", "changed", "archived"):
                 db.execute("""UPDATE inbox_entries SET size_bytes=?,mtime_ns=?,stable_since=?,
                     last_seen_at=?,state='waiting',source_file_id=NULL,last_error=NULL,
                     generation=generation+1 WHERE relative_path=?""", (*sig, now, now, relative))
@@ -52,8 +85,9 @@ def observe(db, paths, now=None):
                     key = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
                     jobs.enqueue(db, "ingest:" + key, "ingest_file", relative, payload, now)
                     db.execute("UPDATE inbox_entries SET state='queued' WHERE relative_path=?", (relative,))
-    for row in db.execute("SELECT relative_path FROM inbox_entries").fetchall():
-        if row[0] not in seen:
+    archive_completed_inbox(db, paths)
+    for row in db.execute("SELECT relative_path,state FROM inbox_entries").fetchall():
+        if row[0] not in seen and row[1] != "archived":
             db.execute("UPDATE inbox_entries SET state='missing' WHERE relative_path=?", (row[0],))
 
 def execute(db, paths, job, ocr_config=None):

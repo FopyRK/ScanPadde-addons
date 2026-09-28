@@ -70,15 +70,28 @@ def test_hash_atomic_and_inbox_unchanged(env):
 
 def test_duplicate_and_rename(env):
     paths, db = env
-    p = fixture_file(paths)
+    fixture_file(paths)
     intake(paths, db)
     intake(paths, db)
-    paths.guard("inbox/copy.pdf").write_bytes(p.read_bytes())
+    paths.guard("inbox/copy.pdf").write_bytes(next(paths.guard("processed").iterdir()).read_bytes())
     intake(paths, db)
+    observe(db, paths, time.time())
     assert db.execute("SELECT count(*) FROM source_files").fetchone()[0] == 1
     assert len(list(paths.guard("originals").iterdir())) == 1
-    assert db.execute("SELECT count(*) FROM inbox_entries WHERE state='processed'").fetchone()[0] == 2
-    assert len(list(paths.guard("inbox").iterdir())) == 2
+    assert db.execute("SELECT count(*) FROM inbox_entries WHERE state='archived'").fetchone()[0] == 2
+    assert not list(paths.guard("inbox").iterdir())
+    assert len(list(paths.guard("processed").iterdir())) == 2
+
+def test_completed_input_moves_to_local_processed_archive(env):
+    paths, db = env
+    source = fixture_file(paths, "finished.pdf", pages=2)
+    intake(paths, db)
+    db.execute("UPDATE pages SET status='ocr_completed'")
+    observe(db, paths, time.time())
+    assert not source.exists()
+    archived = list(paths.guard("processed").iterdir())
+    assert len(archived) == 1 and sha(archived[0]) == sha(paths.guard("originals").iterdir().__next__())
+    assert db.execute("SELECT state FROM inbox_entries").fetchone()[0] == "archived"
 
 def test_local_handoff_preserves_database_and_options(tmp_path):
     source_paths = Paths(tmp_path / "share/scanpadde", tmp_path / "source-data")
