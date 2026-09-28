@@ -102,7 +102,14 @@
         const item = evidence.find(entry => entry.after_page_id === page.id);
         return `<p class="boundary">Trennung nach Seite ${page.page_number}: ${esc(item?.evidence_json || 'keine Hinweise')}</p>`;
       }).join('');
-      card.innerHTML = `<h2>${esc(metadata.display_name.effective_value?.value)} <small>· Gruppe ${group.id} · <span class="group-status">${esc(statusText[group.status] || group.status)}</span></small></h2><p class="pages">${detail.pages.map(page => `Seite ${page.page_number}`).join(', ')}</p><div class="page-cards">${pageCards}</div><p class="metadata">Lieferant: <span data-field="supplier">${esc(metadata.supplier.effective_value?.value)}</span> · Rechnungsnr.: <span data-field="invoice_number">${esc(metadata.invoice_number.effective_value?.value)}</span> · Datum: <span data-field="invoice_date">${esc(metadata.invoice_date.effective_value?.value)}</span> · Typ: <span data-field="document_type">${esc(metadata.document_type.effective_value?.value)}</span></p>${duplicateNote}${groupingEvidence ? `<p class="grouping-evidence">${esc(groupingEvidence)}</p>` : ''}${boundaries}${reviewActions}`;
+      const exportState = await fetch(`../api/groups/${group.id}/export`).then(response => response.json());
+      const exportRecord = exportState.export;
+      const exportActions = group.status === 'approved'
+        ? (exportRecord?.status === 'completed'
+          ? `<p class="export-status">PDF bereit: ${esc(exportRecord.output_filename)}</p><a class="export-download" href="../api/exports/${exportRecord.id}/download">PDF öffnen / herunterladen</a>`
+          : `<button data-a="export">PDF erzeugen</button><span class="export-status">${exportRecord?.status === 'failed' ? 'Fehler' : 'Noch nicht erzeugt'}</span>`)
+        : '<p class="export-status">Export erst nach Freigabe möglich.</p>';
+      card.innerHTML = `<h2>${esc(metadata.display_name.effective_value?.value)} <small>· Gruppe ${group.id} · <span class="group-status">${esc(statusText[group.status] || group.status)}</span></small></h2><p class="pages">${detail.pages.map(page => `Seite ${page.page_number}`).join(', ')}</p><div class="page-cards">${pageCards}</div><p class="metadata">Lieferant: <span data-field="supplier">${esc(metadata.supplier.effective_value?.value)}</span> · Rechnungsnr.: <span data-field="invoice_number">${esc(metadata.invoice_number.effective_value?.value)}</span> · Datum: <span data-field="invoice_date">${esc(metadata.invoice_date.effective_value?.value)}</span> · Typ: <span data-field="document_type">${esc(metadata.document_type.effective_value?.value)}</span></p>${duplicateNote}${groupingEvidence ? `<p class="grouping-evidence">${esc(groupingEvidence)}</p>` : ''}${boundaries}${reviewActions}<p class="export-actions">${exportActions}</p>`;
       card.onclick = async event => {
         const action = event.target.dataset.a;
         if (!action) {
@@ -123,6 +130,8 @@
             const page = detail.pages.find(item => item.id === Number(event.target.dataset.pageId));
             if (page) await showOcrText(page);
             return;
+          } else if (action === 'export') {
+            await call(`../api/groups/${group.id}/export`, 'POST', {});
           } else if (action === 'hide-duplicate') {
             if (!confirm('Diese Gruppe wird nur als Duplikat ausgeblendet. Original und OCR bleiben erhalten. Fortfahren?')) return;
             await call(`../api/sources/${id}/hide-duplicate`, 'POST', {group_id: group.id});

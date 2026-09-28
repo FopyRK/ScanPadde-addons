@@ -39,9 +39,15 @@ class Paths:
             self._no_links(self.data / name)
         for name in ("inbox", "processed", "originals", "pages", "failed", "export"):
             self.guard(name).mkdir(parents=True, exist_ok=True)
+        for name in ("export/ready", "export/superseded", "export/failed"):
+            self.guard(name).mkdir(parents=True, exist_ok=True)
 
     def check(self):
         for name in ("inbox", "processed", "originals", "pages", "failed", "export"):
+            p = self.guard(name)
+            if not p.is_dir() or not os.access(p, os.R_OK | os.W_OK):
+                raise OSError("work_directory_unavailable")
+        for name in ("export/ready", "export/superseded", "export/failed"):
             p = self.guard(name)
             if not p.is_dir() or not os.access(p, os.R_OK | os.W_OK):
                 raise OSError("work_directory_unavailable")

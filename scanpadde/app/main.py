@@ -13,7 +13,7 @@ from . import VERSION, jobs
 from .db import connection, initialize, transaction
 from .ingestion import observe, execute
 from .paths import Paths
-from .storage import cleanup_temps, process_lock
+from .storage import cleanup_temps, process_lock, sha
 from .config import load_ocr_config, load_ollama_config, load_drive_sync_config, _drive_remote
 from .drive_sync import DriveSync
 from .features import extract
@@ -21,6 +21,7 @@ from .ollama import OllamaClient, OllamaError, _input_digest
 from .remote_ocr import RemoteOcrClient, RemoteOcrError
 from .segmentation import reprocess_source, group_detail, override, apply_ollama_suggestion, _known_entities, group_display_name, duplicate_candidates
 from .handoff import export_handoff, import_handoff
+from .pdf_export import ExportError, materialize as materialize_pdf, recover as recover_exports
 
 ASSETS = Path(__file__).parent
 
@@ -53,6 +54,7 @@ class Runtime:
             initialize(self.db_path)
             with connection(self.db_path) as db:
                 jobs.recover(db)
+                recover_exports(db, self.paths)
             cleanup_temps(self.paths)
             self.stop.clear()
             self.state = "idle"
@@ -455,6 +457,37 @@ def create_app(paths=None, background=True, allow_test_client=False, config_dir=
     def approve(source_id: int, payload: dict): return apply_group_action(source_id, "approve", payload)
     @app.post("/api/sources/{source_id}/needs-review")
     def needs_review(source_id: int, payload: dict): return apply_group_action(source_id, "needs_review", payload)
+
+    @app.get("/api/groups/{group_id}/export")
+    def group_export(group_id: int):
+        with connection(runtime.db_path) as db:
+            group = db.execute("SELECT revision,status FROM document_groups WHERE id=?", (group_id,)).fetchone()
+            if not group:
+                raise HTTPException(404, "group_not_found")
+            export = db.execute("""SELECT * FROM document_exports WHERE group_id=? AND group_revision=?
+                ORDER BY export_version DESC LIMIT 1""", (group_id, group["revision"])).fetchone()
+            return {"group_status": group["status"], "export": dict(export) if export else None}
+
+    @app.post("/api/groups/{group_id}/export")
+    def create_group_export(group_id: int):
+        try:
+            with connection(runtime.db_path) as db:
+                export, reused = materialize_pdf(db, runtime.paths, group_id)
+            return {"export": export, "reused": reused}
+        except ExportError as exc:
+            code = str(exc)
+            raise HTTPException(409 if code == "approved_group_required" else 422, code)
+
+    @app.get("/api/exports/{export_id}/download")
+    def download_export(export_id: int):
+        with connection(runtime.db_path) as db:
+            export = db.execute("SELECT * FROM document_exports WHERE id=?", (export_id,)).fetchone()
+        if not export or export["status"] != "completed" or not export["output_path"]:
+            raise HTTPException(404, "export_not_available")
+        output = runtime.paths.guard(export["output_path"])
+        if not output.is_file() or sha(output) != export["sha256"]:
+            raise HTTPException(409, "export_integrity_failed")
+        return FileResponse(output, media_type="application/pdf", filename=export["output_filename"])
 
     @app.get("/api/pages/{page_id}")
     def page(page_id: int):

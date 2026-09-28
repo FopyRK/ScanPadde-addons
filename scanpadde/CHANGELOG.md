@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.38 — 2026-09-28
+
+- Add Phase 4A: approved-review PDF materialisation with persistent export
+  records, atomic validation and SHA-256, deterministic safe names, Ingress
+  download, idempotency, and restart recovery. Original archives and OCR are
+  never modified; a later group edit forks a review revision and supersedes
+  the older export.
+
 ## 0.1.37 — 2026-09-28
 
 - Make the ScanPadde Ingress entry available to normal Home Assistant users.

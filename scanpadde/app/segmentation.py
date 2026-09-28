@@ -369,12 +369,36 @@ def apply_ollama_suggestion(db, source_id, groups, pages, model, input_digest):
             group_ids.append(group_id)
     return group_ids
 
+def _editable_group(db, source_id, group_id):
+    """Fork an approved review revision before changing it.
+
+    This is the export boundary: completed PDFs remain tied to the old group
+    row and its page sequence, while a later reviewer change starts a new
+    revision that must be approved independently.
+    """
+    group = db.execute("SELECT * FROM document_groups WHERE id=? AND source_file_id=?",
+                       (group_id, source_id)).fetchone()
+    if not group:
+        raise ValueError("group_not_found")
+    if group["status"] != "approved":
+        return group
+    new_revision = group["revision"] + 1
+    replacement = db.execute("""INSERT INTO document_groups(source_file_id,revision,status,algorithm_version,
+        metadata_json,parent_group_id,created_at) VALUES(?,?,?,?,?,?,?)""",
+        (source_id, new_revision, "review_required", group["algorithm_version"], group["metadata_json"],
+         group["id"], time.time())).lastrowid
+    for page in db.execute("SELECT page_id,sequence FROM group_pages WHERE group_id=? ORDER BY sequence", (group_id,)):
+        db.execute("INSERT INTO group_pages(group_id,page_id,sequence) VALUES(?,?,?)",
+                   (replacement, page["page_id"], page["sequence"]))
+    db.execute("UPDATE document_groups SET status='superseded' WHERE id=?", (group_id,))
+    db.execute("UPDATE document_exports SET status='superseded' WHERE group_id=? AND status='completed'", (group_id,))
+    return db.execute("SELECT * FROM document_groups WHERE id=?", (replacement,)).fetchone()
+
 def override(db, source_id, action, payload):
     with transaction(db):
         db.execute("INSERT INTO group_overrides(source_file_id,action,payload_json,created_at) VALUES(?,?,?,?)", (source_id,action,json.dumps(payload),time.time()))
         if action == "metadata":
-            g=db.execute("SELECT * FROM document_groups WHERE id=?", (payload["group_id"],)).fetchone()
-            if not g or g["source_file_id"] != source_id: raise ValueError("group_not_found")
+            g=_editable_group(db, source_id, payload["group_id"])
             m=json.loads(g["metadata_json"]); field=payload["field"]
             if field == "display_name" and field not in m:
                 generated = _display_name(m)
@@ -389,7 +413,9 @@ def override(db, source_id, action, payload):
                 raise ValueError("group_not_found")
             _learn_from_approved_group(db, group)
             db.execute("UPDATE document_groups SET status='approved' WHERE id=?", (group["id"],))
-        elif action == "needs_review": db.execute("UPDATE document_groups SET status='review_required' WHERE id=? AND source_file_id=?", (payload["group_id"],source_id))
+        elif action == "needs_review":
+            group = _editable_group(db, source_id, payload["group_id"])
+            db.execute("UPDATE document_groups SET status='review_required' WHERE id=?", (group["id"],))
         elif action == "hide_duplicate":
             group_id = payload.get("group_id")
             candidate = next((item for item in duplicate_candidates(db, source_id) if item["group_id"] == group_id), None)
@@ -434,7 +460,8 @@ def override(db, source_id, action, payload):
                 for seq,row in enumerate(ordered,1): db.execute("UPDATE group_pages SET sequence=? WHERE group_id=? AND page_id=?",(seq,group_id,row["page_id"]))
         elif action == "reorder_page":
             group_id, page_id, direction = payload.get("group_id"), payload.get("page_id"), payload.get("direction")
-            group = db.execute("SELECT source_file_id FROM document_groups WHERE id=?", (group_id,)).fetchone()
+            group = _editable_group(db, source_id, group_id)
+            group_id = group["id"]
             pages = db.execute("SELECT page_id FROM group_pages WHERE group_id=? ORDER BY sequence", (group_id,)).fetchall()
             index = next((i for i, page in enumerate(pages) if page["page_id"] == page_id), None)
             shift = -1 if direction == "earlier" else 1 if direction == "later" else 0
@@ -447,7 +474,8 @@ def override(db, source_id, action, payload):
             db.execute("UPDATE document_groups SET status='review_required' WHERE id=?", (group_id,))
         elif action == "exclude_page":
             group_id, page_id = payload.get("group_id"), payload.get("page_id")
-            group = db.execute("SELECT source_file_id FROM document_groups WHERE id=?", (group_id,)).fetchone()
+            group = _editable_group(db, source_id, group_id)
+            group_id = group["id"]
             page = db.execute("SELECT 1 FROM group_pages WHERE group_id=? AND page_id=?", (group_id, page_id)).fetchone()
             if not group or group["source_file_id"] != source_id or not page:
                 raise ValueError("invalid_exclude")

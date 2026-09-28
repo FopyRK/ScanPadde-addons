@@ -82,12 +82,26 @@ CREATE TABLE learning_rule_events (
  field TEXT,
  created_at REAL NOT NULL
 );
-PRAGMA user_version=10;
+CREATE TABLE document_exports (
+ id INTEGER PRIMARY KEY,
+ group_id INTEGER NOT NULL REFERENCES document_groups(id),
+ group_revision INTEGER NOT NULL,
+ export_version INTEGER NOT NULL DEFAULT 1,
+ status TEXT NOT NULL CHECK(status IN ('pending','building','completed','failed','superseded')),
+ created_at REAL NOT NULL, completed_at REAL,
+ output_filename TEXT, output_path TEXT, sha256 TEXT,
+ page_count INTEGER, source_page_ids_json TEXT NOT NULL DEFAULT '[]',
+ metadata_snapshot_json TEXT NOT NULL DEFAULT '{}', error TEXT,
+ supersedes_export_id INTEGER REFERENCES document_exports(id),
+ UNIQUE(group_id,group_revision,export_version)
+);
+CREATE INDEX document_exports_group ON document_exports(group_id,group_revision,status);
+PRAGMA user_version=11;
 """
 
 def migrate(conn):
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version > 10:
+    if version > 11:
         raise RuntimeError("future_schema_rejected")
     if version == 0:
         conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nCOMMIT;")
@@ -247,4 +261,22 @@ def migrate(conn):
         INSERT INTO group_overrides SELECT * FROM group_overrides_old;
         DROP TABLE group_overrides_old;
         PRAGMA user_version=10;
+        COMMIT;""")
+    elif version == 10:
+        conn.executescript("""BEGIN IMMEDIATE;
+        CREATE TABLE document_exports (
+          id INTEGER PRIMARY KEY,
+          group_id INTEGER NOT NULL REFERENCES document_groups(id),
+          group_revision INTEGER NOT NULL,
+          export_version INTEGER NOT NULL DEFAULT 1,
+          status TEXT NOT NULL CHECK(status IN ('pending','building','completed','failed','superseded')),
+          created_at REAL NOT NULL, completed_at REAL,
+          output_filename TEXT, output_path TEXT, sha256 TEXT,
+          page_count INTEGER, source_page_ids_json TEXT NOT NULL DEFAULT '[]',
+          metadata_snapshot_json TEXT NOT NULL DEFAULT '{}', error TEXT,
+          supersedes_export_id INTEGER REFERENCES document_exports(id),
+          UNIQUE(group_id,group_revision,export_version)
+        );
+        CREATE INDEX document_exports_group ON document_exports(group_id,group_revision,status);
+        PRAGMA user_version=11;
         COMMIT;""")
