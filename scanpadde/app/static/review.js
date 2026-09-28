@@ -27,7 +27,7 @@
 
   async function load() {
     let groups = await fetch(`../api/sources/${id}/groups`).then(response => response.json());
-    if (!groups.length || groups.some(group => group.algorithm_version !== 'phase3-segmentation-v2' && group.algorithm_version !== 'ollama-review-apply-v1')) {
+    if (!groups.length || groups.some(group => group.algorithm_version !== 'phase3-segmentation-v3' && group.algorithm_version !== 'ollama-review-apply-v1')) {
       await call(`../api/sources/${id}/analyze`, 'POST', {});
       groups = await fetch(`../api/sources/${id}/groups`).then(response => response.json());
     }
@@ -37,6 +37,7 @@
     for (const group of groups) {
       const detail = await fetch(`../api/groups/${group.id}`).then(response => response.json());
       const metadata = detail.metadata_json;
+      const groupingEvidence = metadata.grouping_evidence?.effective_value?.value;
       const card = document.createElement('section');
       card.className = 'group';
       card.dataset.groupId = group.id;
@@ -45,7 +46,7 @@
         const item = evidence.find(entry => entry.after_page_id === page.id);
         return `<p class="boundary">Trennung nach Seite ${page.page_number}: ${esc(item?.evidence_json || 'keine Hinweise')}</p>`;
       }).join('');
-      card.innerHTML = `<h2>${esc(metadata.display_name.effective_value?.value)} <small>· Gruppe ${group.id} · <span class="group-status">${esc(statusText[group.status] || group.status)}</span></small></h2><p class="pages">${detail.pages.map(page => `Seite ${page.page_number}`).join(', ')}</p><div class="page-cards">${pageCards}</div><p class="metadata">Lieferant: <span data-field="supplier">${esc(metadata.supplier.effective_value?.value)}</span> · Rechnungsnr.: <span data-field="invoice_number">${esc(metadata.invoice_number.effective_value?.value)}</span> · Datum: <span data-field="invoice_date">${esc(metadata.invoice_date.effective_value?.value)}</span> · Typ: <span data-field="document_type">${esc(metadata.document_type.effective_value?.value)}</span></p>${boundaries}<button data-a="split">Vor Seite trennen …</button> <button data-a="merge">Mit vorheriger Gruppe zusammenführen</button> <button data-a="move">Seite verschieben …</button> ${metadataFields.map(([field, label]) => `<button data-a="edit" data-field="${field}">${label} bearbeiten</button>`).join(' ')} <button data-a="approve">Gruppe freigeben</button> <button data-a="review">Prüfung erforderlich markieren</button>`;
+      card.innerHTML = `<h2>${esc(metadata.display_name.effective_value?.value)} <small>· Gruppe ${group.id} · <span class="group-status">${esc(statusText[group.status] || group.status)}</span></small></h2><p class="pages">${detail.pages.map(page => `Seite ${page.page_number}`).join(', ')}</p><div class="page-cards">${pageCards}</div><p class="metadata">Lieferant: <span data-field="supplier">${esc(metadata.supplier.effective_value?.value)}</span> · Rechnungsnr.: <span data-field="invoice_number">${esc(metadata.invoice_number.effective_value?.value)}</span> · Datum: <span data-field="invoice_date">${esc(metadata.invoice_date.effective_value?.value)}</span> · Typ: <span data-field="document_type">${esc(metadata.document_type.effective_value?.value)}</span></p>${groupingEvidence ? `<p class="grouping-evidence">${esc(groupingEvidence)}</p>` : ''}${boundaries}<button data-a="split">Vor Seite trennen …</button> <button data-a="merge">Mit vorheriger Gruppe zusammenführen</button> <button data-a="move">Seite verschieben …</button> ${metadataFields.map(([field, label]) => `<button data-a="edit" data-field="${field}">${label} bearbeiten</button>`).join(' ')} <button data-a="approve">Gruppe freigeben</button> <button data-a="review">Prüfung erforderlich markieren</button>`;
       card.onclick = async event => {
         const action = event.target.dataset.a;
         if (!action) {

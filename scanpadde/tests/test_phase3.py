@@ -49,6 +49,20 @@ def test_boundary_uses_receipt_number_as_document_identity():
     assert evidence['decision'] == 'split'
     assert 'document_number_switch' in evidence['strong_for_split']
 
+def test_reconciliation_merges_interleaved_counter_backed_documents_for_review(env):
+    _, db = env
+    sid = source(db, 4)
+    page(db, sid, 1, 'ACME GmbH\\nRechnung Nr: A-1\\nSeite 1 von 2')
+    page(db, sid, 2, 'BETA GmbH\\nRechnung Nr: B-1\\nSeite 1 von 2')
+    page(db, sid, 3, 'ACME GmbH\\nRechnung Nr: A-1\\nSeite 2 von 2')
+    page(db, sid, 4, 'BETA GmbH\\nRechnung Nr: B-1\\nSeite 2 von 2')
+    groups = reprocess_source(db, sid)
+    assert len(groups) == 2
+    first = group_detail(db, groups[0])
+    assert [item['page_number'] for item in first['pages']] == [1, 3]
+    assert first['status'] == 'review_required'
+    assert 'Automatisch zusammengeführt' in first['metadata_json']['grouping_evidence']['effective_value']['value']
+
 def test_feature_extraction_accepts_ocr_variants_of_receipt_label():
     features = extract('Belegnummeı: Belegdatum 2612810610077726')
     assert features['document_number_candidates'][0]['normalized'] == '2612810610077726'

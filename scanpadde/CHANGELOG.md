@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.29 — 2026-09-28
+
+- Reconcile interleaved proposed groups when supplier and document number match and their distinct page counters share one total; the combined result is always marked `review_required` and keeps its physical page order.
+- Do not let a coincidental page-counter sequence override an explicit document-number change.
+
 ## 0.1.28 — 2026-09-28
 
 - Add an opt-in Google Drive intake through a local rclone profile: files are copied to the local inbox first and moved in Drive only after local hash archival and complete OCR.

@@ -3,7 +3,7 @@ import json, re, time
 from .db import transaction
 from .features import extract, FEATURE_VERSION
 
-ALGORITHM_VERSION = "phase3-segmentation-v2"
+ALGORITHM_VERSION = "phase3-segmentation-v3"
 
 def _known_entities(db):
     """Return only locally confirmed, reusable labels; never OCR text."""
@@ -81,6 +81,69 @@ def _first_available(features, name):
             return candidate
     return None
 
+
+def _identity_merge_signature(indices, features):
+    """Return a high-confidence cross-group document identity, if available.
+
+    Equal document numbers alone are not sufficient: number reuse and OCR
+    mistakes are common.  We require one shared supplier, one shared document
+    identifier, an identical ``page N of M`` total, and distinct page numbers.
+    """
+    content = [features[index] for index in indices if features[index]["blankness"] == "content"]
+    if not content:
+        return None
+    suppliers = set().union(*(_values(item, "supplier_candidates") for item in content))
+    document_ids = set().union(*(_document_ids(item) for item in content))
+    counters = set()
+    for item in content:
+        for candidate in item.get("page_number_candidates", []):
+            try:
+                number, total = int(candidate["value"]), int(candidate["count"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if 1 <= number <= total and total >= 2:
+                counters.add((number, total))
+    totals = {total for _, total in counters}
+    if len(suppliers) != 1 or len(document_ids) != 1 or len(totals) != 1 or not counters:
+        return None
+    return next(iter(suppliers)), next(iter(document_ids)), next(iter(totals)), {number for number, _ in counters}
+
+
+def _reconcile_identity_segments(segments, features):
+    """Merge only strong, page-counter-backed identity matches for review.
+
+    The scanner can interleave fronts/backs or reverse a duplex stack.  This
+    pass can therefore join non-adjacent proposed segments, but it leaves their
+    physical page order untouched and always makes the result review-required.
+    """
+    candidates = {}
+    for position, indices in enumerate(segments):
+        signature = _identity_merge_signature(indices, features)
+        if signature is None:
+            continue
+        supplier, document_id, total, numbers = signature
+        candidates.setdefault((supplier, document_id, total), []).append((position, indices, numbers))
+    merged = {}
+    consumed = set()
+    for (_, _, total), items in candidates.items():
+        numbers = set().union(*(item[2] for item in items))
+        # A complete, non-duplicated counter is the final guard against
+        # joining two separate documents that happen to share an identifier.
+        if len(items) < 2 or len(numbers) < 2 or len(numbers) != sum(len(item[2]) for item in items):
+            continue
+        positions = [item[0] for item in items]
+        indices = sorted(index for _, segment, _ in items for index in segment)
+        first = min(positions)
+        merged[first] = (indices, {"page_total": total, "page_numbers": sorted(numbers)})
+        consumed.update(positions)
+    result = []
+    for position, indices in enumerate(segments):
+        if position in merged:
+            result.append(merged[position])
+        elif position not in consumed:
+            result.append((indices, None))
+    return result
+
 def boundary(left, right):
     e = {"strong_for_split": [], "medium_for_split": [], "weak_for_split": [], "strong_for_continue": [], "medium_for_continue": [], "conflicts": []}
     ls, rs = _values(left, "supplier_candidates"), _values(right, "supplier_candidates")
@@ -94,7 +157,7 @@ def boundary(left, right):
     if li and li == ri: e["strong_for_continue"].append("same_document_number")
     lp, rp = _first(left, "page_number_candidates"), _first(right, "page_number_candidates")
     if rp and rp.get("value") == "1": e["strong_for_split"].append("new_page_1")
-    if lp and rp and lp.get("count") == rp.get("count"):
+    if lp and rp and lp.get("count") == rp.get("count") and not (li and ri and li.isdisjoint(ri)):
         try:
             if int(rp["value"]) == int(lp["value"]) + 1: e["strong_for_continue"].append("page_counter_continuation")
         except ValueError: pass
@@ -106,7 +169,7 @@ def boundary(left, right):
     confidence = "high" if (decision == "split" and len(e["strong_for_split"]) >= 1 and not e["conflicts"]) or (decision == "continue" and len(e["strong_for_continue"]) >= 1) else "medium" if decision != "review" else "low"
     return {**e, "decision": decision, "decision_reason": (e["conflicts"] or e["strong_for_split"] or e["strong_for_continue"] or ["insufficient_evidence"])[0], "confidence": confidence}
 
-def _metadata(features):
+def _metadata(features, identity_merge=None):
     fields = {"supplier": "supplier_candidates", "recipient": "recipient_candidates", "invoice_number": "invoice_number_candidates", "document_type": "probable_document_type", "invoice_date": "date_candidates", "gross": "amount_candidates", "IBAN": "iban_bic_candidates"}
     metadata = {key: {"auto_value": _first_available(features, source), "human_value": None,
                       "effective_value": _first_available(features, source), "evidence_pages": []}
@@ -119,6 +182,13 @@ def _metadata(features):
                                       "effective_value": document_id, "evidence_pages": []}
     metadata["display_name"] = {"auto_value": _display_name(metadata), "human_value": None,
                                 "effective_value": _display_name(metadata), "evidence_pages": []}
+    if identity_merge:
+        total = identity_merge["page_total"]
+        numbers = ", ".join(str(number) for number in identity_merge["page_numbers"])
+        note = {"value": f"Automatisch zusammengeführt: gleiche Nummer, gleicher Lieferant, Seiten {numbers} von {total}",
+                "normalized": "identity_page_counter", "source": "identity_reconciliation", "evidence": "review_required"}
+        metadata["grouping_evidence"] = {"auto_value": note, "human_value": None,
+                                         "effective_value": note, "evidence_pages": []}
     return metadata
 
 def _display_name(metadata):
@@ -190,11 +260,14 @@ def reprocess_source(db, source_id):
             db.execute("INSERT OR REPLACE INTO boundary_evidence VALUES(?,?,?,?,?)", (source_id, rows[i]["id"], ALGORITHM_VERSION, json.dumps(ev), time.time()))
             if ev["decision"] == "split": starts.append(i+1)
         starts.append(len(rows))
+        segments = [list(range(a, b)) for a, b in zip(starts, starts[1:])]
         groups=[]
-        for a,b in zip(starts, starts[1:]):
-            fs = features[a:b]; status = "review_required" if any(ev["decision"] == "review" for ev in evidences[a:b]) or len(_values(fs[0], "supplier_candidates")) == 0 and not _document_ids(fs[0]) else "proposed"
-            gid = db.execute("INSERT INTO document_groups(source_file_id,revision,status,algorithm_version,metadata_json,created_at) VALUES(?,?,?,?,?,?)", (source_id,revision,status,ALGORITHM_VERSION,json.dumps(_metadata(fs)),time.time())).lastrowid
-            for seq, row in enumerate(rows[a:b], 1): db.execute("INSERT INTO group_pages(group_id,page_id,sequence) VALUES(?,?,?)", (gid,row["id"],seq))
+        for indices, identity_merge in _reconcile_identity_segments(segments, features):
+            fs = [features[index] for index in indices]
+            group_evidence = [evidences[index] for index in indices if index < len(evidences)]
+            status = "review_required" if identity_merge or any(ev["decision"] == "review" for ev in group_evidence) or len(_values(fs[0], "supplier_candidates")) == 0 and not _document_ids(fs[0]) else "proposed"
+            gid = db.execute("INSERT INTO document_groups(source_file_id,revision,status,algorithm_version,metadata_json,created_at) VALUES(?,?,?,?,?,?)", (source_id,revision,status,ALGORITHM_VERSION,json.dumps(_metadata(fs, identity_merge)),time.time())).lastrowid
+            for seq, index in enumerate(indices, 1): db.execute("INSERT INTO group_pages(group_id,page_id,sequence) VALUES(?,?,?)", (gid,rows[index]["id"],seq))
             groups.append(gid)
     return groups
 
