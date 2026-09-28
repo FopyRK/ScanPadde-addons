@@ -302,7 +302,7 @@ def create_app(paths=None, background=True, allow_test_client=False):
             raise HTTPException(404, "source_not_found")
         return rows("""SELECT dg.* FROM document_groups dg LEFT JOIN group_pages gp ON gp.group_id=dg.id
                     LEFT JOIN pages p ON p.id=gp.page_id
-                    WHERE dg.source_file_id=? AND dg.status != 'superseded'
+                    WHERE dg.source_file_id=? AND dg.status NOT IN ('superseded','rejected')
                     GROUP BY dg.id ORDER BY MIN(p.page_number), dg.id""", (source_id,))
 
     @app.get("/api/groups/{group_id}")
@@ -331,6 +331,10 @@ def create_app(paths=None, background=True, allow_test_client=False):
     def merge(source_id: int, payload: dict): return apply_group_action(source_id, "merge", payload)
     @app.post("/api/sources/{source_id}/move-page")
     def move_page(source_id: int, payload: dict): return apply_group_action(source_id, "move_page", payload)
+    @app.post("/api/sources/{source_id}/reorder-page")
+    def reorder_page(source_id: int, payload: dict): return apply_group_action(source_id, "reorder_page", payload)
+    @app.post("/api/sources/{source_id}/exclude-page")
+    def exclude_page(source_id: int, payload: dict): return apply_group_action(source_id, "exclude_page", payload)
     @app.patch("/api/sources/{source_id}/metadata")
     def metadata(source_id: int, payload: dict): return apply_group_action(source_id, "metadata", payload)
     @app.post("/api/sources/{source_id}/approve")

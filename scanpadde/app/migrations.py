@@ -47,7 +47,7 @@ CREATE TABLE page_features (page_id INTEGER PRIMARY KEY REFERENCES pages(id), fe
 CREATE TABLE document_groups (id INTEGER PRIMARY KEY, source_file_id INTEGER NOT NULL REFERENCES source_files(id), revision INTEGER NOT NULL, status TEXT NOT NULL CHECK(status IN ('proposed','review_required','approved','rejected','superseded')), algorithm_version TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', parent_group_id INTEGER REFERENCES document_groups(id), created_at REAL NOT NULL, UNIQUE(source_file_id, revision, id));
 CREATE TABLE group_pages (group_id INTEGER NOT NULL REFERENCES document_groups(id), page_id INTEGER NOT NULL REFERENCES pages(id), sequence INTEGER NOT NULL CHECK(sequence > 0), PRIMARY KEY(group_id,page_id), UNIQUE(group_id,sequence));
 CREATE TABLE boundary_evidence (source_file_id INTEGER NOT NULL REFERENCES source_files(id), after_page_id INTEGER NOT NULL REFERENCES pages(id), algorithm_version TEXT NOT NULL, evidence_json TEXT NOT NULL, created_at REAL NOT NULL, PRIMARY KEY(source_file_id,after_page_id,algorithm_version));
-CREATE TABLE group_overrides (id INTEGER PRIMARY KEY, source_file_id INTEGER NOT NULL REFERENCES source_files(id), action TEXT NOT NULL CHECK(action IN ('split','merge','move_page','metadata','approve','needs_review','apply_ollama_suggestion')), payload_json TEXT NOT NULL, created_at REAL NOT NULL);
+CREATE TABLE group_overrides (id INTEGER PRIMARY KEY, source_file_id INTEGER NOT NULL REFERENCES source_files(id), action TEXT NOT NULL CHECK(action IN ('split','merge','move_page','reorder_page','exclude_page','metadata','approve','needs_review','apply_ollama_suggestion')), payload_json TEXT NOT NULL, created_at REAL NOT NULL);
 CREATE INDEX group_pages_page ON group_pages(page_id);
 CREATE INDEX groups_source ON document_groups(source_file_id,revision DESC);
 CREATE TABLE ollama_grouping_suggestions (
@@ -64,12 +64,12 @@ CREATE TABLE learned_metadata_rules (
  created_at REAL NOT NULL,
  UNIQUE(field, normalized)
 );
-PRAGMA user_version=6;
+PRAGMA user_version=7;
 """
 
 def migrate(conn):
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version > 6:
+    if version > 7:
         raise RuntimeError("future_schema_rejected")
     if version == 0:
         conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nCOMMIT;")
@@ -176,4 +176,16 @@ def migrate(conn):
           UNIQUE(field, normalized)
         );
         PRAGMA user_version=6;
+        COMMIT;""")
+    elif version == 6:
+        conn.executescript("""BEGIN IMMEDIATE;
+        ALTER TABLE group_overrides RENAME TO group_overrides_old;
+        CREATE TABLE group_overrides (
+          id INTEGER PRIMARY KEY, source_file_id INTEGER NOT NULL REFERENCES source_files(id),
+          action TEXT NOT NULL CHECK(action IN ('split','merge','move_page','reorder_page','exclude_page','metadata','approve','needs_review','apply_ollama_suggestion')),
+          payload_json TEXT NOT NULL, created_at REAL NOT NULL
+        );
+        INSERT INTO group_overrides SELECT * FROM group_overrides_old;
+        DROP TABLE group_overrides_old;
+        PRAGMA user_version=7;
         COMMIT;""")

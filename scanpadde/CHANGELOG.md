@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.25 — 2026-09-28
+
+- Allow reviewers to reorder pages within a group and to hide a blank page from that group without deleting the original or OCR record.
+
 ## 0.1.24 — 2026-09-28
 
 - Learn locally confirmed supplier aliases and labelled invoice-number formats from manual review entries; no OCR text, documents, or rules leave ScanPadde.

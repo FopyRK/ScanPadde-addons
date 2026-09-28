@@ -130,3 +130,16 @@ def test_confirmed_metadata_creates_local_reusable_rules(env):
     detail = group_detail(db, reprocess_source(db, later)[0])
     assert detail['metadata_json']['supplier']['effective_value']['value'] == 'My Supplier'
     assert detail['metadata_json']['invoice_number']['effective_value']['normalized'] == 'ZX100'
+
+def test_review_can_reorder_and_exclude_pages_without_deleting_ocr(env):
+    _, db = env
+    sid = source(db, 3)
+    first, second, blank = [page(db, sid, number, text) for number, text in [
+        (1, 'ACME GmbH Rechnung Nr: A-1'), (2, 'ACME GmbH Rechnung Nr: A-1'), (3, '')
+    ]]
+    group = reprocess_source(db, sid)[0]
+    override(db, sid, 'reorder_page', {'group_id': group, 'page_id': second, 'direction': 'earlier'})
+    assert [item['id'] for item in group_detail(db, group)['pages']][:2] == [second, first]
+    override(db, sid, 'exclude_page', {'group_id': group, 'page_id': blank})
+    assert [item['id'] for item in group_detail(db, group)['pages']] == [second, first]
+    assert db.execute('SELECT count(*) FROM ocr_results WHERE page_id=?', (blank,)).fetchone()[0] == 1

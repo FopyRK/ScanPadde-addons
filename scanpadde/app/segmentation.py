@@ -51,6 +51,13 @@ def _remember_invoice_label(db, group_id, value):
 def _norm_rule(value):
     return re.sub(r"\s+", " ", value.strip()).upper()
 
+def _compact_sequences(db, group_id):
+    """Renumber only a review group's local order, never the archived pages."""
+    pages = db.execute("SELECT page_id FROM group_pages WHERE group_id=? ORDER BY sequence", (group_id,)).fetchall()
+    db.execute("UPDATE group_pages SET sequence=sequence+10000 WHERE group_id=?", (group_id,))
+    for sequence, page in enumerate(pages, 1):
+        db.execute("UPDATE group_pages SET sequence=? WHERE group_id=? AND page_id=?", (sequence, group_id, page["page_id"]))
+
 def _values(f, name): return {x["normalized"] for x in f.get(name, []) if x.get("normalized")}
 def _first(f, name): return (f.get(name) or [None])[0]
 
@@ -269,3 +276,29 @@ def override(db, source_id, action, payload):
                 # move out of the UNIQUE(group_id,sequence) range before compacting it
                 db.execute("UPDATE group_pages SET sequence=sequence+10000 WHERE group_id=?",(group_id,))
                 for seq,row in enumerate(ordered,1): db.execute("UPDATE group_pages SET sequence=? WHERE group_id=? AND page_id=?",(seq,group_id,row["page_id"]))
+        elif action == "reorder_page":
+            group_id, page_id, direction = payload.get("group_id"), payload.get("page_id"), payload.get("direction")
+            group = db.execute("SELECT source_file_id FROM document_groups WHERE id=?", (group_id,)).fetchone()
+            pages = db.execute("SELECT page_id FROM group_pages WHERE group_id=? ORDER BY sequence", (group_id,)).fetchall()
+            index = next((i for i, page in enumerate(pages) if page["page_id"] == page_id), None)
+            shift = -1 if direction == "earlier" else 1 if direction == "later" else 0
+            if not group or group["source_file_id"] != source_id or index is None or not shift or not 0 <= index + shift < len(pages):
+                raise ValueError("invalid_reorder")
+            pages[index], pages[index + shift] = pages[index + shift], pages[index]
+            db.execute("UPDATE group_pages SET sequence=sequence+10000 WHERE group_id=?", (group_id,))
+            for sequence, page in enumerate(pages, 1):
+                db.execute("UPDATE group_pages SET sequence=? WHERE group_id=? AND page_id=?", (sequence, group_id, page["page_id"]))
+            db.execute("UPDATE document_groups SET status='review_required' WHERE id=?", (group_id,))
+        elif action == "exclude_page":
+            group_id, page_id = payload.get("group_id"), payload.get("page_id")
+            group = db.execute("SELECT source_file_id FROM document_groups WHERE id=?", (group_id,)).fetchone()
+            page = db.execute("SELECT 1 FROM group_pages WHERE group_id=? AND page_id=?", (group_id, page_id)).fetchone()
+            if not group or group["source_file_id"] != source_id or not page:
+                raise ValueError("invalid_exclude")
+            db.execute("DELETE FROM group_pages WHERE group_id=? AND page_id=?", (group_id, page_id))
+            remaining = db.execute("SELECT count(*) FROM group_pages WHERE group_id=?", (group_id,)).fetchone()[0]
+            if remaining:
+                _compact_sequences(db, group_id)
+                db.execute("UPDATE document_groups SET status='review_required' WHERE id=?", (group_id,))
+            else:
+                db.execute("UPDATE document_groups SET status='rejected' WHERE id=?", (group_id,))

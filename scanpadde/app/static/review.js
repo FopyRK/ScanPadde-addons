@@ -40,21 +40,22 @@
       const card = document.createElement('section');
       card.className = 'group';
       card.dataset.groupId = group.id;
-      const pageCards = detail.pages.map(page => `<article class="page-card" data-page-id="${page.id}"><img class="thumbnail" src="../api/pages/${page.id}/thumbnail" alt="Vorschau Seite ${page.page_number}"><strong>Seite ${page.page_number}</strong><p class="ocr-snippet">OCR: ${esc((page.ocr_snippet || '').slice(0, 100))}</p></article>`).join('');
+      const pageCards = detail.pages.map(page => `<article class="page-card" data-page-id="${page.id}"><img class="thumbnail" src="../api/pages/${page.id}/thumbnail" alt="Vorschau Seite ${page.page_number}"><strong>Seite ${page.page_number}</strong><p class="ocr-snippet">OCR: ${esc((page.ocr_snippet || '').slice(0, 100))}</p><p class="page-controls"><button data-a="reorder" data-page-id="${page.id}" data-direction="earlier">← Früher</button> <button data-a="reorder" data-page-id="${page.id}" data-direction="later">Später →</button> <button data-a="exclude" data-page-id="${page.id}">Leerseite ausblenden</button></p></article>`).join('');
       const boundaries = detail.pages.slice(0, -1).map(page => {
         const item = evidence.find(entry => entry.after_page_id === page.id);
         return `<p class="boundary">Trennung nach Seite ${page.page_number}: ${esc(item?.evidence_json || 'keine Hinweise')}</p>`;
       }).join('');
       card.innerHTML = `<h2>Gruppe ${group.id} · <span class="group-status">${esc(statusText[group.status] || group.status)}</span></h2><p class="pages">${detail.pages.map(page => `Seite ${page.page_number}`).join(', ')}</p><div class="page-cards">${pageCards}</div><p class="metadata">Lieferant: <span data-field="supplier">${esc(metadata.supplier.effective_value?.value)}</span> · Rechnungsnr.: <span data-field="invoice_number">${esc(metadata.invoice_number.effective_value?.value)}</span> · Datum: <span data-field="invoice_date">${esc(metadata.invoice_date.effective_value?.value)}</span> · Typ: <span data-field="document_type">${esc(metadata.document_type.effective_value?.value)}</span></p>${boundaries}<button data-a="split">Vor Seite trennen …</button> <button data-a="merge">Mit vorheriger Gruppe zusammenführen</button> <button data-a="move">Seite verschieben …</button> ${metadataFields.map(([field, label]) => `<button data-a="edit" data-field="${field}">${label} bearbeiten</button>`).join(' ')} <button data-a="approve">Gruppe freigeben</button> <button data-a="review">Prüfung erforderlich markieren</button>`;
       card.onclick = async event => {
-        const pageCard = event.target.closest('.page-card');
-        if (pageCard) {
-          const page = detail.pages.find(item => item.id === Number(pageCard.dataset.pageId));
-          if (page) showPreview(page);
+        const action = event.target.dataset.a;
+        if (!action) {
+          const pageCard = event.target.closest('.page-card');
+          if (pageCard) {
+            const page = detail.pages.find(item => item.id === Number(pageCard.dataset.pageId));
+            if (page) showPreview(page);
+          }
           return;
         }
-        const action = event.target.dataset.a;
-        if (!action) return;
         try {
           if (action === 'approve' || action === 'review') {
             await call(`../api/sources/${id}/${action === 'approve' ? 'approve' : 'needs-review'}`, 'POST', {group_id: group.id});
@@ -74,6 +75,12 @@
             const target = prompt('Ziel-Gruppennummer eingeben:');
             const page = detail.pages.find(item => item.page_number === Number(number));
             if (page && target) await call(`../api/sources/${id}/move-page`, 'POST', {page_id: page.id, target_group_id: Number(target)});
+          } else if (action === 'reorder') {
+            await call(`../api/sources/${id}/reorder-page`, 'POST', {group_id: group.id, page_id: Number(event.target.dataset.pageId), direction: event.target.dataset.direction});
+          } else if (action === 'exclude') {
+            if (confirm('Diese Seite wird nur aus dieser Dokumentgruppe ausgeblendet. Original und OCR bleiben erhalten. Fortfahren?')) {
+              await call(`../api/sources/${id}/exclude-page`, 'POST', {group_id: group.id, page_id: Number(event.target.dataset.pageId)});
+            }
           }
           await load();
         } catch (error) {
