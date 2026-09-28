@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.37 — 2026-09-28
+
+- Make the ScanPadde Ingress entry available to normal Home Assistant users.
+  This changes only the app-panel visibility; app configuration, Home
+  Assistant administration, and configured secrets remain restricted.
+
 ## 0.1.36 — 2026-09-28
 
 - Fix delivery of the Drive-connection setup script so the private `rclone.conf` upload form works in the ScanPadde interface.

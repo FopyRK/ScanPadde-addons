@@ -1,5 +1,5 @@
 name: ScanPadde V2
-version: "0.1.36"
+version: "0.1.37"
 slug: scanpadde_v2
 description: Local, persistent structural document intake. Experimental Phase 1A.
 arch:
@@ -10,7 +10,10 @@ init: false
 ingress: true
 ingress_port: 8099
 panel_icon: mdi:file-document-multiple-outline
-panel_admin: true
+# The ScanPadde review UI is safe for regular Home Assistant users.  This only
+# controls the sidebar/Ingress entry; it does not expose the App's
+# configuration, Home Assistant administration, or any configured secrets.
+panel_admin: false
 map:
   - type: share
     read_only: false
