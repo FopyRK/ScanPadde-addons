@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.21 — 2026-09-28
+
+- Translate all review controls, statuses, prompts, and page action labels to
+  German.
+
 ## 0.1.20 — 2026-09-28
 
 - Show supplier, document number, and other OCR metadata suggestions from any

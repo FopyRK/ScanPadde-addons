@@ -1,5 +1,5 @@
 name: ScanPadde V2
-version: "0.1.20"
+version: "0.1.21"
 slug: scanpadde_v2
 description: Local, persistent structural document intake. Experimental Phase 1A.
 arch:
