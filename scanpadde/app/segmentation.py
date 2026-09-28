@@ -17,7 +17,15 @@ def _document_ids(features):
     return _values(features, "invoice_number_candidates") | _values(features, "document_number_candidates")
 
 def _first_document_id(features):
-    return _first(features, "invoice_number_candidates") or _first(features, "document_number_candidates")
+    return _first_available(features, "invoice_number_candidates") or _first_available(features, "document_number_candidates")
+
+def _first_available(features, name):
+    """Use the first traceable candidate across a complete document group."""
+    for feature in features:
+        candidate = _first(feature, name)
+        if candidate:
+            return candidate
+    return None
 
 def boundary(left, right):
     e = {"strong_for_split": [], "medium_for_split": [], "weak_for_split": [], "strong_for_continue": [], "medium_for_continue": [], "conflicts": []}
@@ -46,13 +54,28 @@ def boundary(left, right):
 
 def _metadata(features):
     fields = {"supplier": "supplier_candidates", "recipient": "recipient_candidates", "invoice_number": "invoice_number_candidates", "document_type": "probable_document_type", "invoice_date": "date_candidates", "gross": "amount_candidates", "IBAN": "iban_bic_candidates"}
-    metadata = {key: {"auto_value": _first(features[0], source), "human_value": None, "effective_value": _first(features[0], source), "evidence_pages": []} for key, source in fields.items()}
+    metadata = {key: {"auto_value": _first_available(features, source), "human_value": None,
+                      "effective_value": _first_available(features, source), "evidence_pages": []}
+                for key, source in fields.items()}
     # The review UI intentionally has one compact number field.  Populate it
     # with a receipt/document number when the document has no invoice number.
     if metadata["invoice_number"]["auto_value"] is None:
-        document_id = _first_document_id(features[0])
+        document_id = _first_document_id(features)
         metadata["invoice_number"] = {"auto_value": document_id, "human_value": None,
                                       "effective_value": document_id, "evidence_pages": []}
+    return metadata
+
+def _enrich_metadata(metadata, features):
+    """Fill only empty automatic fields in a review response, never overrides.
+
+    A scan may begin with a blank reverse side or place a document number on a
+    later page.  Returning these group-wide OCR candidates makes them visible
+    as suggestions while leaving the persisted review decision untouched.
+    """
+    inferred = _metadata(features)
+    for field, value in metadata.items():
+        if value.get("human_value") is None and value.get("effective_value") is None:
+            metadata[field] = inferred[field]
     return metadata
 
 def reprocess_source(db, source_id):
@@ -100,7 +123,15 @@ def reprocess_source(db, source_id):
 def group_detail(db, group_id):
     group = db.execute("SELECT * FROM document_groups WHERE id=?", (group_id,)).fetchone()
     if not group: return None
-    result=dict(group); result["metadata_json"]=json.loads(result["metadata_json"]); result["pages"]=[dict(r) for r in db.execute("""SELECT p.*, (SELECT text FROM ocr_results WHERE page_id=p.id AND status='completed' ORDER BY created_at DESC LIMIT 1) AS ocr_snippet FROM group_pages gp JOIN pages p ON p.id=gp.page_id WHERE gp.group_id=? ORDER BY gp.sequence""", (group_id,))]; return result
+    result=dict(group); result["metadata_json"]=json.loads(result["metadata_json"])
+    result["pages"]=[dict(r) for r in db.execute("""SELECT p.*,
+        (SELECT text FROM ocr_results WHERE page_id=p.id AND status='completed' ORDER BY created_at DESC LIMIT 1) AS ocr_snippet,
+        (SELECT words_json FROM ocr_results WHERE page_id=p.id AND status='completed' ORDER BY created_at DESC LIMIT 1) AS ocr_words_json
+        FROM group_pages gp JOIN pages p ON p.id=gp.page_id WHERE gp.group_id=? ORDER BY gp.sequence""", (group_id,))]
+    features = [extract(page["ocr_snippet"] or "", page["ocr_words_json"], page["width"], page["height"])
+                for page in result["pages"]]
+    result["metadata_json"] = _enrich_metadata(result["metadata_json"], features)
+    return result
 
 def apply_ollama_suggestion(db, source_id, groups, pages, model, input_digest):
     """Turn a confirmed, local-only hint into review groups.

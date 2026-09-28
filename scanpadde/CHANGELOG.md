@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.20 — 2026-09-28
+
+- Show supplier, document number, and other OCR metadata suggestions from any
+  page in a review group, including documents that begin with a blank reverse.
+
 ## 0.1.19 — 2026-09-28
 
 - Add an explicit, confirmed “Vorschlag übernehmen” action for local Ollama

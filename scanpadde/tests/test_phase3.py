@@ -100,3 +100,12 @@ def test_confirmed_ollama_hint_creates_review_groups_without_touching_ocr(env):
     import pytest
     with pytest.raises(ValueError, match='already_applied'):
         apply_ollama_suggestion(db, sid, groups, pages, 'local-model', 'digest-a')
+
+def test_group_detail_suggests_metadata_found_on_a_later_page(env):
+    _, db = env; sid = source(db, 2)
+    page(db, sid, 1, '')
+    page(db, sid, 2, 'ACME GmbH\nRechnung Nr: AB-123')
+    group_id = reprocess_source(db, sid)[0]
+    detail = group_detail(db, group_id)
+    assert detail['metadata_json']['supplier']['effective_value']['value'] == 'ACME GmbH'
+    assert detail['metadata_json']['invoice_number']['effective_value']['normalized'] == 'AB123'
