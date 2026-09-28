@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.7 — 2026-09-28
+
+- Fix review analysis for pages containing VAT/tax labels, which previously caused a server error.
+
 ## 0.1.6 — 2026-09-28
 
 - Repair migration of a previously configured remote-OCR worker when Home Assistant has created only default release options.

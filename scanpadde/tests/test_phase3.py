@@ -23,6 +23,10 @@ def test_recipient_role_type_and_blankness():
     assert f['probable_document_type'][0]['normalized']=='invoice'
     assert extract('   ')['blankness']=='blank'
 
+def test_feature_extraction_handles_tax_keyword_without_capture_group():
+    features = extract('USt 19 Prozent')
+    assert features['vat_tax_candidates'][0]['value'].lower().startswith('ust')
+
 def test_boundary_switch_and_continuation():
     a=extract('ACME GmbH\nRechnung Nr: A1\nSeite 1 von 2')
     b=extract('ACME GmbH\nRechnung Nr: A1\nSeite 2 von 2')

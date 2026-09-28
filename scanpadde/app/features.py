@@ -45,8 +45,15 @@ def extract(text, words_json=None, width=None, height=None, known_entities=None)
     lowered = text.lower()
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     def matches(pattern, source, normalizer=None):
-        return [_candidate(m.group(1), source, m.group(0), normalized=(normalizer(m.group(1)) if normalizer else None))
-                for m in re.finditer(pattern, text, re.I)]
+        result = []
+        for match in re.finditer(pattern, text, re.I):
+            # Most extraction rules expose their value as capture group 1.
+            # Keyword-presence rules such as VAT deliberately do not, so their
+            # full match is the only safe, traceable candidate value.
+            value = match.group(1) if match.lastindex else match.group(0)
+            result.append(_candidate(value, source, match.group(0),
+                                     normalized=(normalizer(value) if normalizer else None)))
+        return result
     invoices = matches(r"(?:rechnung(?:s)?\s*(?:nummer|nr\.?|no\.?)|invoice(?:\s*(?:no\.?|number))?)\s*[:#]?\s*([A-Z0-9][A-Z0-9 /_-]{2,})", "invoice_label", normalize_invoice)
     docs = matches(r"(?:beleg(?:nummer|nr\.?)|document(?:\s*(?:no\.?|number))?)\s*[:#]?\s*([A-Z0-9][A-Z0-9 /_-]{2,})", "document_label", normalize_invoice)
     dates = matches(r"\b(\d{1,2}[.]\d{1,2}[.]\d{2,4}|\d{4}-\d{1,2}-\d{1,2})\b", "date")
