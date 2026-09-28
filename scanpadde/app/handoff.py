@@ -112,8 +112,27 @@ def import_handoff(paths, data_dir: Path, config_dir: Path = Path("/config")) ->
     options_source = directory / OPTIONS_NAME
     options_destination = data_dir / OPTIONS_NAME
     if options_source.is_file() and _has_default_ocr_options(options_destination):
-        options_destination = data_dir / OPTIONS_NAME
-        options_destination.write_bytes(options_source.read_bytes())
+        # A Supervisor configuration submitted after the one-time hand-off can
+        # contain new, non-OCR options while its legacy OCR fields are still
+        # defaults. Preserve those explicit newer options; repair only the
+        # remote-OCR fields from the local hand-off snapshot.
+        try:
+            current = json.loads(options_destination.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            current = {}
+        try:
+            handed_off = json.loads(options_source.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            handed_off = {}
+        if isinstance(current, dict) and isinstance(handed_off, dict):
+            merged = {**handed_off, **current}
+            for key in ("ocr_backend", "ocr_worker_url", "ocr_worker_ca", "ocr_worker_token"):
+                if key in handed_off:
+                    merged[key] = handed_off[key]
+            option_data = json.dumps(merged, separators=(",", ":")).encode("utf-8")
+        else:
+            option_data = options_source.read_bytes()
+        options_destination.write_bytes(option_data)
         os.chmod(options_destination, 0o600)
         copied = True
     ca_source = directory / CA_NAME

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.12 — 2026-09-28
+
+- Preserve explicitly configured optional local-analysis settings when the
+  one-time hand-off repairs legacy default OCR fields.
+
 ## 0.1.11 — 2026-09-28
 
 - Add an optional, private-LAN Ollama review pass. It only proposes contiguous

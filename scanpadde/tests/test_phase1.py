@@ -129,6 +129,27 @@ def test_local_handoff_repairs_supervisor_default_options(tmp_path):
     assert options["ocr_backend"] == "remote"
     assert (target_config / "scanpadde-ocr-ca.crt").read_text(encoding="utf-8") == "test-ca"
 
+
+def test_local_handoff_keeps_new_explicit_non_ocr_options(tmp_path):
+    source_paths = Paths(tmp_path / "share/scanpadde", tmp_path / "source-data")
+    source_paths.initialize()
+    initialize(source_paths.data / "scanpadde.db")
+    source_config = tmp_path / "source-config"; source_config.mkdir()
+    (source_config / "worker-ca.crt").write_text("test-ca", encoding="utf-8")
+    (source_paths.data / "options.json").write_text(json.dumps({
+        "ocr_backend": "remote", "ocr_worker_url": "https://worker.invalid",
+        "ocr_worker_ca": "worker-ca.crt", "ocr_worker_token": "secret"}), encoding="utf-8")
+    export_handoff(source_paths, source_paths.data, source_config)
+    target_data = tmp_path / "target-data"; target_data.mkdir()
+    (target_data / "options.json").write_text(json.dumps({
+        "ocr_backend": "disabled", "ocr_worker_url": "", "ocr_worker_ca": "", "ocr_worker_token": "",
+        "ollama_enabled": True, "ollama_url": "http://192.168.10.168:11434", "ollama_model": "qwen2.5:1.5b"}), encoding="utf-8")
+    target_config = tmp_path / "target-config"
+    assert import_handoff(source_paths, target_data, target_config) is True
+    options = json.loads((target_data / "options.json").read_text(encoding="utf-8"))
+    assert options["ocr_backend"] == "remote"
+    assert options["ollama_enabled"] is True and options["ollama_model"] == "qwen2.5:1.5b"
+
 def test_same_name_changed_content(env):
     paths, db = env
     fixture_file(paths)
