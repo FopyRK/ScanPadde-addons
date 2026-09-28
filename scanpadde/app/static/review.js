@@ -12,12 +12,55 @@
   document.body.append(preview);
   preview.querySelector('button').onclick = () => preview.close();
   preview.addEventListener('click', event => { if (event.target === preview) preview.close(); });
+  const ocrPreview = document.createElement('dialog');
+  ocrPreview.className = 'ocr-vorschau';
+  ocrPreview.innerHTML = '<button class="ocr-vorschau-schliessen" type="button">Schließen</button><p class="ocr-vorschau-titel"></p><p class="ocr-vorschau-hinweis">Dieser Text stammt aus der lokalen OCR und kann markiert oder kopiert werden.</p><textarea class="ocr-vorschau-text" readonly spellcheck="false"></textarea><button class="ocr-vorschau-kopieren" type="button">Text kopieren</button><span class="ocr-vorschau-status" aria-live="polite"></span>';
+  document.body.append(ocrPreview);
+  ocrPreview.querySelector('.ocr-vorschau-schliessen').onclick = () => ocrPreview.close();
+  ocrPreview.addEventListener('click', event => { if (event.target === ocrPreview) ocrPreview.close(); });
 
   function showPreview(page) {
     preview.querySelector('.seitenvorschau-titel').textContent = `Seite ${page.page_number}`;
     preview.querySelector('img').src = `../api/pages/${page.id}/thumbnail`;
     preview.showModal();
   }
+
+  async function showOcrText(page) {
+    const textArea = ocrPreview.querySelector('.ocr-vorschau-text');
+    const status = ocrPreview.querySelector('.ocr-vorschau-status');
+    ocrPreview.querySelector('.ocr-vorschau-titel').textContent = `OCR-Text – Seite ${page.page_number}`;
+    textArea.value = 'OCR-Text wird geladen …';
+    textArea.disabled = true;
+    status.textContent = '';
+    ocrPreview.showModal();
+    try {
+      const results = await fetch(`../api/pages/${page.id}/ocr`).then(response => {
+        if (!response.ok) throw new Error('OCR-Text ist nicht verfügbar.');
+        return response.json();
+      });
+      const result = results.find(item => item.status === 'completed') || results[0];
+      textArea.value = result?.text || 'Für diese Seite liegt noch kein OCR-Text vor.';
+      textArea.disabled = false;
+      textArea.focus();
+      textArea.select();
+    } catch (error) {
+      textArea.value = error.message;
+    }
+  }
+
+  ocrPreview.querySelector('.ocr-vorschau-kopieren').onclick = async () => {
+    const textArea = ocrPreview.querySelector('.ocr-vorschau-text');
+    const status = ocrPreview.querySelector('.ocr-vorschau-status');
+    textArea.focus();
+    textArea.select();
+    try {
+      await navigator.clipboard.writeText(textArea.value);
+      status.textContent = 'Kopiert.';
+    } catch (_) {
+      document.execCommand('copy');
+      status.textContent = 'Markiert – mit ⌘C kopieren.';
+    }
+  };
 
   async function call(path, method, body) {
     const response = await fetch(path, {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
@@ -41,7 +84,7 @@
       const card = document.createElement('section');
       card.className = 'group';
       card.dataset.groupId = group.id;
-      const pageCards = detail.pages.map(page => `<article class="page-card" data-page-id="${page.id}"><img class="thumbnail" src="../api/pages/${page.id}/thumbnail" alt="Vorschau Seite ${page.page_number}"><strong>Seite ${page.page_number}</strong><p class="ocr-snippet">OCR: ${esc((page.ocr_snippet || '').slice(0, 100))}</p><p class="page-controls"><button data-a="reorder" data-page-id="${page.id}" data-direction="earlier">← Früher</button> <button data-a="reorder" data-page-id="${page.id}" data-direction="later">Später →</button> <button data-a="exclude" data-page-id="${page.id}">Leerseite ausblenden</button></p></article>`).join('');
+      const pageCards = detail.pages.map(page => `<article class="page-card" data-page-id="${page.id}"><img class="thumbnail" src="../api/pages/${page.id}/thumbnail" alt="Vorschau Seite ${page.page_number}"><strong>Seite ${page.page_number}</strong><p class="ocr-snippet">OCR: ${esc((page.ocr_snippet || '').slice(0, 100))}</p><p class="page-controls"><button data-a="ocr-text" data-page-id="${page.id}">OCR-Text kopieren</button> <button data-a="reorder" data-page-id="${page.id}" data-direction="earlier">← Früher</button> <button data-a="reorder" data-page-id="${page.id}" data-direction="later">Später →</button> <button data-a="exclude" data-page-id="${page.id}">Leerseite ausblenden</button></p></article>`).join('');
       const boundaries = detail.pages.slice(0, -1).map(page => {
         const item = evidence.find(entry => entry.after_page_id === page.id);
         return `<p class="boundary">Trennung nach Seite ${page.page_number}: ${esc(item?.evidence_json || 'keine Hinweise')}</p>`;
@@ -58,7 +101,10 @@
           return;
         }
         try {
-          if (action === 'approve' || action === 'review') {
+          if (action === 'ocr-text') {
+            const page = detail.pages.find(item => item.id === Number(event.target.dataset.pageId));
+            if (page) await showOcrText(page);
+          } else if (action === 'approve' || action === 'review') {
             await call(`../api/sources/${id}/${action === 'approve' ? 'approve' : 'needs-review'}`, 'POST', {group_id: group.id});
           } else if (action === 'edit') {
             const field = event.target.dataset.field;
