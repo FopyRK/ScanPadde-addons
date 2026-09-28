@@ -3,9 +3,11 @@
   const id = main.dataset.source;
   const out = document.querySelector('#groups');
   const state = document.querySelector('#state');
+  const hiddenDuplicates = document.querySelector('#hidden-duplicates');
+  let showHiddenDuplicates = false;
   const esc = value => String(value ?? '—').replace(/[&<>]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[char]));
   const metadataFields = [['display_name', 'Bezeichnung'], ['supplier', 'Lieferant'], ['invoice_number', 'Rechnungsnr.'], ['invoice_date', 'Rechnungs-/Belegdatum'], ['document_type', 'Dokumenttyp']];
-  const statusText = {proposed: 'vorgeschlagen', review_required: 'Prüfung erforderlich', approved: 'freigegeben', rejected: 'verworfen'};
+  const statusText = {proposed: 'vorgeschlagen', review_required: 'Prüfung erforderlich', approved: 'freigegeben', rejected: 'als Duplikat ausgeblendet'};
   const preview = document.createElement('dialog');
   preview.className = 'seitenvorschau';
   preview.innerHTML = '<button class="seitenvorschau-schliessen" type="button">Schließen</button><p class="seitenvorschau-titel"></p><img alt="Vergrößerte Dokumentseite">';
@@ -69,20 +71,28 @@
   }
 
   async function load(options = {}) {
-    let groups = await fetch(`../api/sources/${id}/groups`).then(response => response.json());
+    let groups = await fetch(`../api/sources/${id}/groups?include_hidden=${showHiddenDuplicates}`).then(response => response.json());
     if (!groups.length || groups.some(group => group.algorithm_version !== 'phase3-segmentation-v3' && group.algorithm_version !== 'ollama-review-apply-v1')) {
       await call(`../api/sources/${id}/analyze`, 'POST', {});
-      groups = await fetch(`../api/sources/${id}/groups`).then(response => response.json());
+      groups = await fetch(`../api/sources/${id}/groups?include_hidden=${showHiddenDuplicates}`).then(response => response.json());
     }
+    const duplicateHints = await fetch(`../api/sources/${id}/duplicate-candidates`).then(response => response.json());
+    const duplicateByGroup = new Map(duplicateHints.map(item => [item.group_id, item]));
     const evidence = await fetch(`../api/groups/${groups[0]?.id}/evidence`).then(response => response.ok ? response.json() : []);
-    const pending = groups.filter(group => group.status !== 'approved').length;
-    const approved = groups.length - pending;
+    const visibleGroups = groups.filter(group => group.status !== 'rejected');
+    const pending = visibleGroups.filter(group => group.status !== 'approved').length;
+    const approved = visibleGroups.length - pending;
     state.textContent = `${pending} zu prüfen · ${approved} freigegeben`;
     out.innerHTML = '';
     for (const group of groups) {
       const detail = await fetch(`../api/groups/${group.id}`).then(response => response.json());
       const metadata = detail.metadata_json;
       const groupingEvidence = metadata.grouping_evidence?.effective_value?.value;
+      const duplicate = duplicateByGroup.get(group.id);
+      const duplicateNote = duplicate ? `<p class="duplicate-hint">Mögliches Duplikat von Gruppe ${duplicate.duplicate_of}: identische Seitenbilder (${duplicate.page_count} Seiten). Bitte prüfen.</p>` : '';
+      const reviewActions = group.status === 'rejected'
+        ? '<button data-a="restore-duplicate">Duplikat wieder einblenden</button>'
+        : `<button data-a="split">Vor Seite trennen …</button> <button data-a="merge">Mit vorheriger Gruppe zusammenführen</button> <button data-a="move">Seite verschieben …</button> ${metadataFields.map(([field, label]) => `<button data-a="edit" data-field="${field}">${label} bearbeiten</button>`).join(' ')} ${duplicate ? '<button data-a="hide-duplicate">Als Duplikat ausblenden</button>' : ''} <button data-a="approve">Gruppe freigeben</button> <button data-a="review">Prüfung erforderlich markieren</button>`;
       const card = document.createElement('section');
       card.className = 'group';
       card.dataset.groupId = group.id;
@@ -92,7 +102,7 @@
         const item = evidence.find(entry => entry.after_page_id === page.id);
         return `<p class="boundary">Trennung nach Seite ${page.page_number}: ${esc(item?.evidence_json || 'keine Hinweise')}</p>`;
       }).join('');
-      card.innerHTML = `<h2>${esc(metadata.display_name.effective_value?.value)} <small>· Gruppe ${group.id} · <span class="group-status">${esc(statusText[group.status] || group.status)}</span></small></h2><p class="pages">${detail.pages.map(page => `Seite ${page.page_number}`).join(', ')}</p><div class="page-cards">${pageCards}</div><p class="metadata">Lieferant: <span data-field="supplier">${esc(metadata.supplier.effective_value?.value)}</span> · Rechnungsnr.: <span data-field="invoice_number">${esc(metadata.invoice_number.effective_value?.value)}</span> · Datum: <span data-field="invoice_date">${esc(metadata.invoice_date.effective_value?.value)}</span> · Typ: <span data-field="document_type">${esc(metadata.document_type.effective_value?.value)}</span></p>${groupingEvidence ? `<p class="grouping-evidence">${esc(groupingEvidence)}</p>` : ''}${boundaries}<button data-a="split">Vor Seite trennen …</button> <button data-a="merge">Mit vorheriger Gruppe zusammenführen</button> <button data-a="move">Seite verschieben …</button> ${metadataFields.map(([field, label]) => `<button data-a="edit" data-field="${field}">${label} bearbeiten</button>`).join(' ')} <button data-a="approve">Gruppe freigeben</button> <button data-a="review">Prüfung erforderlich markieren</button>`;
+      card.innerHTML = `<h2>${esc(metadata.display_name.effective_value?.value)} <small>· Gruppe ${group.id} · <span class="group-status">${esc(statusText[group.status] || group.status)}</span></small></h2><p class="pages">${detail.pages.map(page => `Seite ${page.page_number}`).join(', ')}</p><div class="page-cards">${pageCards}</div><p class="metadata">Lieferant: <span data-field="supplier">${esc(metadata.supplier.effective_value?.value)}</span> · Rechnungsnr.: <span data-field="invoice_number">${esc(metadata.invoice_number.effective_value?.value)}</span> · Datum: <span data-field="invoice_date">${esc(metadata.invoice_date.effective_value?.value)}</span> · Typ: <span data-field="document_type">${esc(metadata.document_type.effective_value?.value)}</span></p>${duplicateNote}${groupingEvidence ? `<p class="grouping-evidence">${esc(groupingEvidence)}</p>` : ''}${boundaries}${reviewActions}`;
       card.onclick = async event => {
         const action = event.target.dataset.a;
         if (!action) {
@@ -113,6 +123,11 @@
             const page = detail.pages.find(item => item.id === Number(event.target.dataset.pageId));
             if (page) await showOcrText(page);
             return;
+          } else if (action === 'hide-duplicate') {
+            if (!confirm('Diese Gruppe wird nur als Duplikat ausgeblendet. Original und OCR bleiben erhalten. Fortfahren?')) return;
+            await call(`../api/sources/${id}/hide-duplicate`, 'POST', {group_id: group.id});
+          } else if (action === 'restore-duplicate') {
+            await call(`../api/sources/${id}/restore-duplicate`, 'POST', {group_id: group.id});
           } else if (action === 'approve' || action === 'review') {
             await call(`../api/sources/${id}/${action === 'approve' ? 'approve' : 'needs-review'}`, 'POST', {group_id: group.id});
           } else if (action === 'edit') {
@@ -154,5 +169,10 @@
       window.scrollTo({top: options.scrollY ?? window.scrollY});
     }
   }
+  hiddenDuplicates?.addEventListener('click', () => {
+    showHiddenDuplicates = !showHiddenDuplicates;
+    hiddenDuplicates.textContent = showHiddenDuplicates ? 'Ausgeblendete Duplikate ausblenden' : 'Ausgeblendete Duplikate anzeigen';
+    load({scrollY: window.scrollY});
+  });
   load().catch(error => state.textContent = `Prüfungsfehler: ${error.message}`);
 })();

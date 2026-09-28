@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.33 — 2026-09-28
+
+- Detect exact duplicate document groups from their ordered local page-image hashes, flag them for review, and allow a duplicate to be hidden or restored without deleting originals or OCR.
+
 ## 0.1.32 — 2026-09-28
 
 - Add a local, manageable learning library for confirmed supplier aliases and invoice-label patterns. Rules are promoted on approval and can be removed individually or reset without changing documents, OCR, or exports.

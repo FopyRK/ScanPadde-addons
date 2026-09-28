@@ -227,6 +227,36 @@ def group_display_name(metadata):
     item = metadata.get("display_name") or _display_name(metadata)
     return (item.get("human_value") or item.get("effective_value") or item.get("auto_value") or {}).get("value", "Unbenanntes Dokument")
 
+def duplicate_candidates(db, source_id):
+    """Find only exact local page-image duplicates within one source stack.
+
+    Similar supplier names or invoice numbers are deliberately insufficient:
+    a duplicate marker needs identical page-image hashes in the same page
+    order. The result is a review hint; it never hides a group itself.
+    """
+    rows = db.execute("""SELECT dg.id AS group_id,gp.sequence,
+        COALESCE(p.image_sha256, (SELECT o.image_sha256 FROM ocr_results o
+            WHERE o.page_id=p.id AND o.status='completed' ORDER BY o.created_at DESC LIMIT 1)) AS image_hash
+        FROM document_groups dg JOIN group_pages gp ON gp.group_id=dg.id
+        JOIN pages p ON p.id=gp.page_id
+        WHERE dg.source_file_id=? AND dg.status NOT IN ('superseded','rejected')
+        ORDER BY dg.id,gp.sequence""", (source_id,)).fetchall()
+    signatures = {}
+    for row in rows:
+        signatures.setdefault(row["group_id"], []).append(row["image_hash"])
+    first_by_signature, candidates = {}, []
+    for group_id, hashes in signatures.items():
+        if not hashes or any(not digest for digest in hashes):
+            continue
+        signature = tuple(hashes)
+        original = first_by_signature.get(signature)
+        if original is None:
+            first_by_signature[signature] = group_id
+        else:
+            candidates.append({"group_id": group_id, "duplicate_of": original,
+                               "page_count": len(hashes), "method": "identical_page_images"})
+    return candidates
+
 def _learn_from_approved_group(db, group):
     """Promote only explicitly confirmed metadata into reusable local rules."""
     metadata = json.loads(group["metadata_json"] or "{}")
@@ -360,6 +390,18 @@ def override(db, source_id, action, payload):
             _learn_from_approved_group(db, group)
             db.execute("UPDATE document_groups SET status='approved' WHERE id=?", (group["id"],))
         elif action == "needs_review": db.execute("UPDATE document_groups SET status='review_required' WHERE id=? AND source_file_id=?", (payload["group_id"],source_id))
+        elif action == "hide_duplicate":
+            group_id = payload.get("group_id")
+            candidate = next((item for item in duplicate_candidates(db, source_id) if item["group_id"] == group_id), None)
+            if candidate is None:
+                raise ValueError("duplicate_candidate_not_found")
+            db.execute("UPDATE document_groups SET status='rejected' WHERE id=? AND source_file_id=?", (group_id, source_id))
+        elif action == "restore_duplicate":
+            group_id = payload.get("group_id")
+            group = db.execute("SELECT status FROM document_groups WHERE id=? AND source_file_id=?", (group_id, source_id)).fetchone()
+            if not group or group["status"] != "rejected":
+                raise ValueError("hidden_duplicate_not_found")
+            db.execute("UPDATE document_groups SET status='review_required' WHERE id=?", (group_id,))
         elif action == "split":
             g = db.execute("SELECT * FROM document_groups WHERE id=?", (payload["group_id"],)).fetchone()
             pages = db.execute("SELECT page_id FROM group_pages WHERE group_id=? ORDER BY sequence", (payload["group_id"],)).fetchall()

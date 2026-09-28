@@ -18,7 +18,7 @@ from .drive_sync import DriveSync
 from .features import extract
 from .ollama import OllamaClient, OllamaError, _input_digest
 from .remote_ocr import RemoteOcrClient, RemoteOcrError
-from .segmentation import reprocess_source, group_detail, override, apply_ollama_suggestion, _known_entities, group_display_name
+from .segmentation import reprocess_source, group_detail, override, apply_ollama_suggestion, _known_entities, group_display_name, duplicate_candidates
 from .handoff import export_handoff, import_handoff
 
 ASSETS = Path(__file__).parent
@@ -305,14 +305,22 @@ def create_app(paths=None, background=True, allow_test_client=False):
             return {"queued_pages": queued, "backend": "remote"}
 
     @app.get("/api/sources/{source_id}/groups")
-    def source_groups(source_id: int):
+    def source_groups(source_id: int, include_hidden: bool = False):
         if not rows("SELECT id FROM source_files WHERE id=?", (source_id,)):
             raise HTTPException(404, "source_not_found")
+        statuses = "('superseded')" if include_hidden else "('superseded','rejected')"
         return rows("""SELECT dg.* FROM document_groups dg LEFT JOIN group_pages gp ON gp.group_id=dg.id
                     LEFT JOIN pages p ON p.id=gp.page_id
-                    WHERE dg.source_file_id=? AND dg.status NOT IN ('superseded','rejected')
+                    WHERE dg.source_file_id=? AND dg.status NOT IN """ + statuses + """
                     GROUP BY dg.id
                     ORDER BY CASE WHEN dg.status='approved' THEN 1 ELSE 0 END, MIN(p.page_number), dg.id""", (source_id,))
+
+    @app.get("/api/sources/{source_id}/duplicate-candidates")
+    def source_duplicate_candidates(source_id: int):
+        with connection(runtime.db_path) as db:
+            if not db.execute("SELECT id FROM source_files WHERE id=?", (source_id,)).fetchone():
+                raise HTTPException(404, "source_not_found")
+            return duplicate_candidates(db, source_id)
 
     @app.get("/api/groups/{group_id}")
     def api_group(group_id: int):
@@ -344,6 +352,10 @@ def create_app(paths=None, background=True, allow_test_client=False):
     def reorder_page(source_id: int, payload: dict): return apply_group_action(source_id, "reorder_page", payload)
     @app.post("/api/sources/{source_id}/exclude-page")
     def exclude_page(source_id: int, payload: dict): return apply_group_action(source_id, "exclude_page", payload)
+    @app.post("/api/sources/{source_id}/hide-duplicate")
+    def hide_duplicate(source_id: int, payload: dict): return apply_group_action(source_id, "hide_duplicate", payload)
+    @app.post("/api/sources/{source_id}/restore-duplicate")
+    def restore_duplicate(source_id: int, payload: dict): return apply_group_action(source_id, "restore_duplicate", payload)
     @app.patch("/api/sources/{source_id}/metadata")
     def metadata(source_id: int, payload: dict): return apply_group_action(source_id, "metadata", payload)
     @app.post("/api/sources/{source_id}/approve")

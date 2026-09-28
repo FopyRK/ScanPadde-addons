@@ -1,6 +1,6 @@
 import json, time
 from app.features import extract, normalize_amount, normalize_invoice
-from app.segmentation import boundary, reprocess_source, group_detail, override, apply_ollama_suggestion
+from app.segmentation import boundary, reprocess_source, group_detail, override, apply_ollama_suggestion, duplicate_candidates
 
 def page(db, source, number, text, words=None):
     now=time.time(); pid=db.execute("INSERT INTO pages(source_file_id,page_number,width,height,status,created_at) VALUES(?,?,?,?,?,?)",(source,number,1000,1400,'ocr_completed',now)).lastrowid
@@ -48,6 +48,21 @@ def test_boundary_uses_receipt_number_as_document_identity():
     evidence = boundary(continuation, next_receipt)
     assert evidence['decision'] == 'split'
     assert 'document_number_switch' in evidence['strong_for_split']
+
+def test_exact_image_duplicates_are_review_hints_and_can_be_restored(env):
+    _, db = env
+    sid = source(db, 2)
+    page(db, sid, 1, 'ACME GmbH\nRechnung Nr: A-1')
+    page(db, sid, 2, 'BETA GmbH\nRechnung Nr: B-2')
+    db.execute("UPDATE ocr_results SET image_sha256='same-page-image'")
+    first, second = reprocess_source(db, sid)
+    assert duplicate_candidates(db, sid) == [{"group_id": second, "duplicate_of": first,
+                                              "page_count": 1, "method": "identical_page_images"}]
+    override(db, sid, 'hide_duplicate', {'group_id': second})
+    assert db.execute("SELECT status FROM document_groups WHERE id=?", (second,)).fetchone()['status'] == 'rejected'
+    assert duplicate_candidates(db, sid) == []
+    override(db, sid, 'restore_duplicate', {'group_id': second})
+    assert db.execute("SELECT status FROM document_groups WHERE id=?", (second,)).fetchone()['status'] == 'review_required'
 
 def test_reconciliation_merges_interleaved_counter_backed_documents_for_review(env):
     _, db = env
