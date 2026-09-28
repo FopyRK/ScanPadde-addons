@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.34 — 2026-09-28
+
+- Allow a locally confirmed deletion of unreviewed test sources, including their local original, rendered-page, and OCR records. Sources containing approved documents remain protected.
+
 ## 0.1.33 — 2026-09-28
 
 - Detect exact duplicate document groups from their ordered local page-image hashes, flag them for review, and allow a duplicate to be hidden or restored without deleting originals or OCR.

@@ -93,6 +93,37 @@ def test_completed_input_moves_to_local_processed_archive(env):
     assert len(archived) == 1 and sha(archived[0]) == sha(paths.guard("originals").iterdir().__next__())
     assert db.execute("SELECT state FROM inbox_entries").fetchone()[0] == "archived"
 
+def test_unapproved_source_delete_removes_local_derivatives(env):
+    paths, db = env
+    fixture_file(paths, "sample.pdf", pages=1)
+    intake(paths, db)
+    source_id = db.execute("SELECT id FROM source_files").fetchone()[0]
+    page = db.execute("SELECT id FROM pages").fetchone()[0]
+    rendered = paths.guard("pages/sample.png")
+    rendered.write_bytes(b"page")
+    db.execute("UPDATE pages SET rendered_path=? WHERE id=?", ("pages/sample.png", page))
+    db.execute("UPDATE pages SET status='ocr_completed'")
+    observe(db, paths, time.time())
+    app = create_app(paths, background=False, allow_test_client=True)
+    with TestClient(app) as client:
+        assert client.post(f"/api/sources/{source_id}/delete", json={}).status_code == 422
+        assert client.post(f"/api/sources/{source_id}/delete", json={"confirm": True}).json()["ok"] is True
+    assert db.execute("SELECT count(*) FROM source_files").fetchone()[0] == 0
+    assert not rendered.exists()
+    assert not list(paths.guard("originals").iterdir())
+    assert not list(paths.guard("processed").iterdir())
+
+def test_approved_source_delete_is_protected(env):
+    paths, db = env
+    fixture_file(paths, "approved.pdf", pages=1)
+    intake(paths, db)
+    source_id = db.execute("SELECT id FROM source_files").fetchone()[0]
+    db.execute("INSERT INTO document_groups(source_file_id,revision,status,algorithm_version,metadata_json,created_at) VALUES(?,1,'approved','test','{}',?)", (source_id, time.time()))
+    app = create_app(paths, background=False, allow_test_client=True)
+    with TestClient(app) as client:
+        assert client.post(f"/api/sources/{source_id}/delete", json={"confirm": True}).status_code == 409
+    assert db.execute("SELECT count(*) FROM source_files").fetchone()[0] == 1
+
 def test_local_handoff_preserves_database_and_options(tmp_path):
     source_paths = Paths(tmp_path / "share/scanpadde", tmp_path / "source-data")
     source_paths.initialize()

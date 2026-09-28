@@ -304,6 +304,59 @@ def create_app(paths=None, background=True, allow_test_client=False):
                 queued += 1
             return {"queued_pages": queued, "backend": "remote"}
 
+    @app.post("/api/sources/{source_id}/delete")
+    def delete_source(source_id: int, payload: dict):
+        """Permanently remove a source only when it has no approved documents.
+
+        This deliberately cannot remove reviewed business documents. It is for
+        discarded test scans and mistaken, unreviewed intake only. Paths come
+        exclusively from database records and are guarded before unlinking.
+        """
+        if payload.get("confirm") is not True:
+            raise HTTPException(422, "confirmation_required")
+        files = []
+        with connection(runtime.db_path) as db, transaction(db):
+            source = db.execute("SELECT id,sha256,original_filename,archived_path FROM source_files WHERE id=?", (source_id,)).fetchone()
+            if not source:
+                raise HTTPException(404, "source_not_found")
+            if db.execute("SELECT 1 FROM document_groups WHERE source_file_id=? AND status='approved' LIMIT 1", (source_id,)).fetchone():
+                raise HTTPException(409, "approved_documents_protected")
+            if db.execute("SELECT 1 FROM jobs WHERE state IN ('pending','running') AND (subject_id=? OR subject_id IN (SELECT CAST(id AS TEXT) FROM pages WHERE source_file_id=?)) LIMIT 1", (str(source_id), source_id)).fetchone():
+                raise HTTPException(409, "source_has_active_jobs")
+            files.append(runtime.paths.guard(source["archived_path"]))
+            page_ids = [row["id"] for row in db.execute("SELECT id FROM pages WHERE source_file_id=?", (source_id,)).fetchall()]
+            for row in db.execute("SELECT rendered_path FROM pages WHERE source_file_id=? AND rendered_path IS NOT NULL", (source_id,)).fetchall():
+                files.append(runtime.paths.guard(row["rendered_path"]))
+            processed = runtime.paths.guard("processed")
+            prefix = source["sha256"][:12] + "-"
+            suffix = "-" + source["original_filename"]
+            files.extend(path for path in processed.iterdir() if path.is_file() and path.name.startswith(prefix) and path.name.endswith(suffix))
+            group_ids = [row["id"] for row in db.execute("SELECT id FROM document_groups WHERE source_file_id=?", (source_id,)).fetchall()]
+            if group_ids:
+                marks = ",".join("?" for _ in group_ids)
+                db.execute(f"UPDATE learned_metadata_rules SET source_group_id=NULL WHERE source_group_id IN ({marks})", group_ids)
+                db.execute(f"DELETE FROM group_pages WHERE group_id IN ({marks})", group_ids)
+                db.execute(f"DELETE FROM document_groups WHERE id IN ({marks})", group_ids)
+            if page_ids:
+                marks = ",".join("?" for _ in page_ids)
+                db.execute(f"DELETE FROM jobs WHERE subject_id IN ({marks})", [str(page_id) for page_id in page_ids])
+                db.execute(f"DELETE FROM ocr_results WHERE page_id IN ({marks})", page_ids)
+                db.execute(f"DELETE FROM page_features WHERE page_id IN ({marks})", page_ids)
+            db.execute("DELETE FROM boundary_evidence WHERE source_file_id=?", (source_id,))
+            db.execute("DELETE FROM group_overrides WHERE source_file_id=?", (source_id,))
+            db.execute("DELETE FROM ollama_grouping_suggestions WHERE source_file_id=?", (source_id,))
+            db.execute("UPDATE drive_entries SET source_file_id=NULL WHERE source_file_id=?", (source_id,))
+            db.execute("DELETE FROM inbox_entries WHERE source_file_id=?", (source_id,))
+            db.execute("DELETE FROM pages WHERE source_file_id=?", (source_id,))
+            db.execute("DELETE FROM jobs WHERE subject_id=?", (str(source_id),))
+            db.execute("DELETE FROM source_files WHERE id=?", (source_id,))
+        removed = 0
+        for path in files:
+            if path.exists():
+                path.unlink()
+                removed += 1
+        return {"ok": True, "removed_files": removed}
+
     @app.get("/api/sources/{source_id}/groups")
     def source_groups(source_id: int, include_hidden: bool = False):
         if not rows("SELECT id FROM source_files WHERE id=?", (source_id,)):
@@ -451,6 +504,9 @@ def create_app(paths=None, background=True, allow_test_client=False):
     @app.get("/static/learning.js")
     def learning_js(): return FileResponse(ASSETS / "static/learning.js", media_type="application/javascript")
 
+    @app.get("/static/source-delete.js")
+    def source_delete_js(): return FileResponse(ASSETS / "static/source-delete.js", media_type="application/javascript")
+
     @app.get("/review/{source_id}", response_class=HTMLResponse)
     def review(source_id: int):
         if not rows("SELECT id FROM source_files WHERE id=?", (source_id,)): raise HTTPException(404, "source_not_found")
@@ -484,11 +540,13 @@ def create_app(paths=None, background=True, allow_test_client=False):
             captured = __import__("datetime").datetime.fromtimestamp(source["first_seen_at"], __import__("datetime").timezone.utc).isoformat()
             retry = (f'<form action="api/sources/{source["id"]}/retry-ocr" method="post"><button type="submit">OCR nachholen</button></form> '
                      if ocr_done.get(source["id"], 0) < source["page_count"] else "")
+            has_approved = any(group["status"] == "approved" for group in review_summary.get(source["id"], []))
+            delete = ("" if has_approved else f'<button class="source-delete" type="button" data-source-id="{source["id"]}" data-source-name="{escape(source["original_filename"], quote=True)}">Testquelle löschen</button> ')
             return (f"<tr><td>{source['id']}</td><td>{escape(source['original_filename'])}</td>"
                     f"<td>{review_cell(source['id'])}</td><td>{escape(source['sha256'][:12])}</td>"
                     f"<td>{source['page_count']}</td><td>{escape(source['status'])}</td>"
                     f"<td>OCR {ocr_done.get(source['id'], 0)} / {source['page_count']}</td><td>{escape(captured)}</td>"
-                    f"<td>{retry}<a href=\"review/{source['id']}\">Analyse &amp; Review</a></td></tr>")
+                    f"<td>{retry}{delete}<a href=\"review/{source['id']}\">Analyse &amp; Review</a></td></tr>")
         table = "".join(source_row(source) for source in sources())
         template = (ASSETS / "templates/index.html").read_text(encoding="utf-8")
         return template.replace("{{version}}", VERSION).replace("{{health}}", escape(
