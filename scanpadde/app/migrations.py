@@ -47,7 +47,7 @@ CREATE TABLE page_features (page_id INTEGER PRIMARY KEY REFERENCES pages(id), fe
 CREATE TABLE document_groups (id INTEGER PRIMARY KEY, source_file_id INTEGER NOT NULL REFERENCES source_files(id), revision INTEGER NOT NULL, status TEXT NOT NULL CHECK(status IN ('proposed','review_required','approved','rejected','superseded')), algorithm_version TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', parent_group_id INTEGER REFERENCES document_groups(id), created_at REAL NOT NULL, UNIQUE(source_file_id, revision, id));
 CREATE TABLE group_pages (group_id INTEGER NOT NULL REFERENCES document_groups(id), page_id INTEGER NOT NULL REFERENCES pages(id), sequence INTEGER NOT NULL CHECK(sequence > 0), PRIMARY KEY(group_id,page_id), UNIQUE(group_id,sequence));
 CREATE TABLE boundary_evidence (source_file_id INTEGER NOT NULL REFERENCES source_files(id), after_page_id INTEGER NOT NULL REFERENCES pages(id), algorithm_version TEXT NOT NULL, evidence_json TEXT NOT NULL, created_at REAL NOT NULL, PRIMARY KEY(source_file_id,after_page_id,algorithm_version));
-CREATE TABLE group_overrides (id INTEGER PRIMARY KEY, source_file_id INTEGER NOT NULL REFERENCES source_files(id), action TEXT NOT NULL CHECK(action IN ('split','merge','move_page','metadata','approve','needs_review')), payload_json TEXT NOT NULL, created_at REAL NOT NULL);
+CREATE TABLE group_overrides (id INTEGER PRIMARY KEY, source_file_id INTEGER NOT NULL REFERENCES source_files(id), action TEXT NOT NULL CHECK(action IN ('split','merge','move_page','metadata','approve','needs_review','apply_ollama_suggestion')), payload_json TEXT NOT NULL, created_at REAL NOT NULL);
 CREATE INDEX group_pages_page ON group_pages(page_id);
 CREATE INDEX groups_source ON document_groups(source_file_id,revision DESC);
 CREATE TABLE ollama_grouping_suggestions (
@@ -55,12 +55,12 @@ CREATE TABLE ollama_grouping_suggestions (
  model TEXT NOT NULL, input_digest TEXT NOT NULL, suggestion_json TEXT NOT NULL,
  created_at REAL NOT NULL
 );
-PRAGMA user_version=4;
+PRAGMA user_version=5;
 """
 
 def migrate(conn):
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version > 4:
+    if version > 5:
         raise RuntimeError("future_schema_rejected")
     if version == 0:
         conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nCOMMIT;")
@@ -124,7 +124,7 @@ def migrate(conn):
         );
         CREATE TABLE group_overrides (
           id INTEGER PRIMARY KEY, source_file_id INTEGER NOT NULL REFERENCES source_files(id),
-          action TEXT NOT NULL CHECK(action IN ('split','merge','move_page','metadata','approve','needs_review')),
+          action TEXT NOT NULL CHECK(action IN ('split','merge','move_page','metadata','approve','needs_review','apply_ollama_suggestion')),
           payload_json TEXT NOT NULL, created_at REAL NOT NULL
         );
         CREATE INDEX group_pages_page ON group_pages(page_id);
@@ -139,4 +139,19 @@ def migrate(conn):
           created_at REAL NOT NULL
         );
         PRAGMA user_version=4;
+        COMMIT;""")
+    elif version == 4:
+        # SQLite cannot extend a CHECK constraint in place.  Keep the complete
+        # local audit log while allowing a deliberately confirmed KI proposal
+        # to be recorded as a distinct review action.
+        conn.executescript("""BEGIN IMMEDIATE;
+        ALTER TABLE group_overrides RENAME TO group_overrides_old;
+        CREATE TABLE group_overrides (
+          id INTEGER PRIMARY KEY, source_file_id INTEGER NOT NULL REFERENCES source_files(id),
+          action TEXT NOT NULL CHECK(action IN ('split','merge','move_page','metadata','approve','needs_review','apply_ollama_suggestion')),
+          payload_json TEXT NOT NULL, created_at REAL NOT NULL
+        );
+        INSERT INTO group_overrides SELECT * FROM group_overrides_old;
+        DROP TABLE group_overrides_old;
+        PRAGMA user_version=5;
         COMMIT;""")

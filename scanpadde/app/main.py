@@ -15,9 +15,9 @@ from .paths import Paths
 from .storage import cleanup_temps, process_lock
 from .config import load_ocr_config, load_ollama_config
 from .features import extract
-from .ollama import OllamaClient, OllamaError
+from .ollama import OllamaClient, OllamaError, _input_digest
 from .remote_ocr import RemoteOcrClient, RemoteOcrError
-from .segmentation import reprocess_source, group_detail, override
+from .segmentation import reprocess_source, group_detail, override, apply_ollama_suggestion
 from .handoff import export_handoff, import_handoff
 
 ASSETS = Path(__file__).parent
@@ -214,7 +214,7 @@ def create_app(paths=None, background=True, allow_test_client=False):
             raise HTTPException(404, "source_not_found")
         if len(page_rows) != expected["page_count"]:
             raise HTTPException(409, "ocr_incomplete")
-        return [{"page_number": row["page_number"], "text": row["text"],
+        return [{"page_id": row["id"], "page_number": row["page_number"], "text": row["text"],
                  "features": extract(row["text"], row["words_json"], row["width"], row["height"])} for row in page_rows]
 
     @app.get("/api/sources/{source_id}/ollama-suggestion")
@@ -246,6 +246,24 @@ def create_app(paths=None, background=True, allow_test_client=False):
                             json.dumps(suggestion.groups), time.time()))
             return {"groups": suggestion.groups, "model": runtime.ollama_config.model,
                     "review_required": True}
+
+    @app.post("/api/sources/{source_id}/apply-ollama-suggestion")
+    def apply_saved_ollama_suggestion(source_id: int, payload: dict):
+        if payload.get("confirm") is not True:
+            raise HTTPException(422, "confirmation_required")
+        with connection(runtime.db_path) as db:
+            suggestion = db.execute("SELECT model,input_digest,suggestion_json FROM ollama_grouping_suggestions WHERE source_file_id=?", (source_id,)).fetchone()
+            if not suggestion:
+                raise HTTPException(404, "ollama_suggestion_not_found")
+            pages = ollama_pages(db, source_id)
+            if suggestion["input_digest"] != _input_digest(pages, suggestion["model"]):
+                raise HTTPException(409, "ollama_suggestion_stale")
+            try:
+                group_ids = apply_ollama_suggestion(db, source_id, json.loads(suggestion["suggestion_json"]), pages,
+                                                    suggestion["model"], suggestion["input_digest"])
+            except (ValueError, KeyError, json.JSONDecodeError) as exc:
+                raise HTTPException(422, str(exc))
+        return {"group_ids": group_ids, "review_required": True}
 
     @app.post("/api/sources/{source_id}/retry-ocr")
     def retry_source_ocr(source_id: int):

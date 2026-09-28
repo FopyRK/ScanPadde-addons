@@ -1,6 +1,6 @@
 import json, time
 from app.features import extract, normalize_amount, normalize_invoice
-from app.segmentation import boundary, reprocess_source, group_detail, override
+from app.segmentation import boundary, reprocess_source, group_detail, override, apply_ollama_suggestion
 
 def page(db, source, number, text, words=None):
     now=time.time(); pid=db.execute("INSERT INTO pages(source_file_id,page_number,width,height,status,created_at) VALUES(?,?,?,?,?,?)",(source,number,1000,1400,'ocr_completed',now)).lastrowid
@@ -81,3 +81,22 @@ def test_merge_move_and_invalid_review_actions_persist(env):
     with pytest.raises(ValueError): override(db,sid,'split',{'group_id':group_b,'before_page_id':99999})
     other=source(db,1); page(db,other,1,'OTHER GmbH\nRechnung Nr: O-1'); other_id=reprocess_source(db,other)[0]
     with pytest.raises(ValueError): override(db,sid,'merge',{'group_ids':[group_a,other_id]})
+
+def test_confirmed_ollama_hint_creates_review_groups_without_touching_ocr(env):
+    _, db = env; sid = source(db, 3)
+    page(db, sid, 1, 'ACME GmbH\\nRechnung Nr: A-1')
+    page(db, sid, 2, 'ACME GmbH\\nRechnung Nr: A-1')
+    page(db, sid, 3, 'BETA GmbH\\nRechnung Nr: B-2')
+    initial = reprocess_source(db, sid)
+    rows = db.execute("SELECT p.id,p.page_number,o.text,p.width,p.height,o.words_json FROM pages p JOIN ocr_results o ON o.page_id=p.id WHERE p.source_file_id=? ORDER BY p.page_number", (sid,)).fetchall()
+    pages = [{"page_id": row["id"], "page_number": row["page_number"], "features": extract(row["text"], row["words_json"], row["width"], row["height"])} for row in rows]
+    groups = [{"pages": [1, 2], "confidence": "low", "reason": "uncertain"}, {"pages": [3], "confidence": "low", "reason": "uncertain"}]
+    applied = apply_ollama_suggestion(db, sid, groups, pages, 'local-model', 'digest-a')
+    assert len(applied) == 2
+    assert all(group_detail(db, group_id)['status'] == 'review_required' for group_id in applied)
+    assert [page['page_number'] for page in group_detail(db, applied[0])['pages']] == [1, 2]
+    assert db.execute("SELECT count(*) FROM ocr_results").fetchone()[0] == 3
+    assert db.execute("SELECT count(*) FROM document_groups WHERE id IN (?,?) AND status='superseded'", initial).fetchone()[0] == 2
+    import pytest
+    with pytest.raises(ValueError, match='already_applied'):
+        apply_ollama_suggestion(db, sid, groups, pages, 'local-model', 'digest-a')

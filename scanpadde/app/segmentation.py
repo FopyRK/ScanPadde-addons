@@ -102,6 +102,45 @@ def group_detail(db, group_id):
     if not group: return None
     result=dict(group); result["metadata_json"]=json.loads(result["metadata_json"]); result["pages"]=[dict(r) for r in db.execute("""SELECT p.*, (SELECT text FROM ocr_results WHERE page_id=p.id AND status='completed' ORDER BY created_at DESC LIMIT 1) AS ocr_snippet FROM group_pages gp JOIN pages p ON p.id=gp.page_id WHERE gp.group_id=? ORDER BY gp.sequence""", (group_id,))]; return result
 
+def apply_ollama_suggestion(db, source_id, groups, pages, model, input_digest):
+    """Turn a confirmed, local-only hint into review groups.
+
+    This deliberately does not approve, export, rename, or alter originals/OCR.
+    The full ordered partition is validated again at the mutation boundary.
+    """
+    page_numbers = [page["page_number"] for page in pages]
+    proposed = [number for group in groups for number in group.get("pages", [])]
+    if not groups or proposed != page_numbers:
+        raise ValueError("invalid_ollama_suggestion")
+    by_number = {page["page_number"]: page for page in pages}
+    if len(by_number) != len(pages):
+        raise ValueError("invalid_ollama_suggestion")
+    for group in groups:
+        numbers = group.get("pages")
+        if (not isinstance(numbers, list) or not numbers or numbers != sorted(numbers)
+                or numbers != list(range(numbers[0], numbers[-1] + 1))):
+            raise ValueError("invalid_ollama_suggestion")
+    with transaction(db):
+        previous = db.execute("SELECT payload_json FROM group_overrides WHERE source_file_id=? AND action='apply_ollama_suggestion'", (source_id,)).fetchall()
+        if any(json.loads(row["payload_json"]).get("input_digest") == input_digest for row in previous):
+            raise ValueError("ollama_suggestion_already_applied")
+        db.execute("INSERT INTO group_overrides(source_file_id,action,payload_json,created_at) VALUES(?,?,?,?)",
+                   (source_id, "apply_ollama_suggestion", json.dumps({"model": model, "input_digest": input_digest,
+                       "groups": [{"pages": group["pages"], "confidence": group.get("confidence", "low"),
+                                   "reason": group.get("reason", "uncertain")} for group in groups]}), time.time()))
+        db.execute("UPDATE document_groups SET status='superseded' WHERE source_file_id=? AND status NOT IN ('superseded','rejected')", (source_id,))
+        revision = db.execute("SELECT COALESCE(MAX(revision),0)+1 FROM document_groups WHERE source_file_id=?", (source_id,)).fetchone()[0]
+        group_ids = []
+        for group in groups:
+            group_pages = [by_number[number] for number in group["pages"]]
+            group_id = db.execute("INSERT INTO document_groups(source_file_id,revision,status,algorithm_version,metadata_json,created_at) VALUES(?,?,?,?,?,?)",
+                                  (source_id, revision, "review_required", "ollama-review-apply-v1",
+                                   json.dumps(_metadata([page["features"] for page in group_pages])), time.time())).lastrowid
+            for sequence, page in enumerate(group_pages, 1):
+                db.execute("INSERT INTO group_pages(group_id,page_id,sequence) VALUES(?,?,?)", (group_id, page["page_id"], sequence))
+            group_ids.append(group_id)
+    return group_ids
+
 def override(db, source_id, action, payload):
     with transaction(db):
         db.execute("INSERT INTO group_overrides(source_file_id,action,payload_json,created_at) VALUES(?,?,?,?)", (source_id,action,json.dumps(payload),time.time()))

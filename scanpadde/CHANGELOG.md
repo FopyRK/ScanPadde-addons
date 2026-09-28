@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.19 — 2026-09-28
+
+- Add an explicit, confirmed “Vorschlag übernehmen” action for local Ollama
+  grouping hints. It creates only `review_required` groups and preserves
+  originals, OCR, exports, and the local audit trail.
+
 ## 0.1.18 — 2026-09-28
 
 - Use local page positions inside each bounded Ollama request, then map the
