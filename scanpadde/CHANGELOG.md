@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.8 — 2026-09-28
+
+- Treat labelled receipt/document numbers as document identity evidence during review grouping.
+- Show a labelled receipt/document number in the compact review number field when no invoice number exists.
+
 ## 0.1.7 — 2026-09-28
 
 - Fix review analysis for pages containing VAT/tax labels, which previously caused a server error.

@@ -34,6 +34,15 @@ def test_boundary_switch_and_continuation():
     assert 'page_counter_continuation' in boundary(a,b)['strong_for_continue']
     assert boundary(b,c)['decision']=='split' and 'supplier_switch' in boundary(b,c)['strong_for_split']
 
+def test_boundary_uses_receipt_number_as_document_identity():
+    first = extract('MARKT GmbH\nBelegnummer: R-100\nSeite 1 von 2')
+    continuation = extract('MARKT GmbH\nBelegnummer: R-100\nSeite 2 von 2')
+    next_receipt = extract('MARKT GmbH\nBelegnummer: R-101\nSeite 1 von 1')
+    assert 'same_document_number' in boundary(first, continuation)['strong_for_continue']
+    evidence = boundary(continuation, next_receipt)
+    assert evidence['decision'] == 'split'
+    assert 'document_number_switch' in evidence['strong_for_split']
+
 def test_grouping_overrides_and_restart_persistence(env):
     _,db=env; sid=source(db,3); p1=page(db,sid,1,'ACME GmbH\nRechnung Nr: A1\nSeite 1 von 2'); p2=page(db,sid,2,'ACME GmbH\nRechnung Nr: A1\nSeite 2 von 2'); p3=page(db,sid,3,'BETA GmbH\nRechnung Nr: B2')
     ids=reprocess_source(db,sid); assert len(ids)==2

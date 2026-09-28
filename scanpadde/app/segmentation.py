@@ -7,17 +7,29 @@ ALGORITHM_VERSION = "phase3-segmentation-v1"
 def _values(f, name): return {x["normalized"] for x in f.get(name, []) if x.get("normalized")}
 def _first(f, name): return (f.get(name) or [None])[0]
 
+def _document_ids(features):
+    """Document numbers and invoice numbers are equally valid identity evidence.
+
+    Retail receipts often use a ``Belegnummer`` rather than a
+    ``Rechnungsnummer``.  Treating only the latter as an identity caused the
+    real-review pipeline to join distinct receipts from the same supplier.
+    """
+    return _values(features, "invoice_number_candidates") | _values(features, "document_number_candidates")
+
+def _first_document_id(features):
+    return _first(features, "invoice_number_candidates") or _first(features, "document_number_candidates")
+
 def boundary(left, right):
     e = {"strong_for_split": [], "medium_for_split": [], "weak_for_split": [], "strong_for_continue": [], "medium_for_continue": [], "conflicts": []}
     ls, rs = _values(left, "supplier_candidates"), _values(right, "supplier_candidates")
-    li, ri = _values(left, "invoice_number_candidates"), _values(right, "invoice_number_candidates")
+    li, ri = _document_ids(left), _document_ids(right)
     if ls and rs and ls.isdisjoint(rs): e["strong_for_split"].append("supplier_switch")
-    if li and ri and li.isdisjoint(ri): e["strong_for_split"].append("invoice_number_switch")
+    if li and ri and li.isdisjoint(ri): e["strong_for_split"].append("document_number_switch")
     if left["blankness"] != "content" or right["blankness"] != "content": e["weak_for_split"].append("blank_separator")
     if left["layout_fingerprint"] != right["layout_fingerprint"]: e["medium_for_split"].append("layout_change")
     if left["footer_header_repetition_signals"].get("header") == right["footer_header_repetition_signals"].get("header") and left["footer_header_repetition_signals"].get("header"): e["medium_for_continue"].append("same_header")
     if ls and ls == rs: e["strong_for_continue"].append("same_supplier")
-    if li and li == ri: e["strong_for_continue"].append("same_invoice_number")
+    if li and li == ri: e["strong_for_continue"].append("same_document_number")
     lp, rp = _first(left, "page_number_candidates"), _first(right, "page_number_candidates")
     if rp and rp.get("value") == "1": e["strong_for_split"].append("new_page_1")
     if lp and rp and lp.get("count") == rp.get("count"):
@@ -34,7 +46,14 @@ def boundary(left, right):
 
 def _metadata(features):
     fields = {"supplier": "supplier_candidates", "recipient": "recipient_candidates", "invoice_number": "invoice_number_candidates", "document_type": "probable_document_type", "invoice_date": "date_candidates", "gross": "amount_candidates", "IBAN": "iban_bic_candidates"}
-    return {key: {"auto_value": _first(features[0], source), "human_value": None, "effective_value": _first(features[0], source), "evidence_pages": []} for key, source in fields.items()}
+    metadata = {key: {"auto_value": _first(features[0], source), "human_value": None, "effective_value": _first(features[0], source), "evidence_pages": []} for key, source in fields.items()}
+    # The review UI intentionally has one compact number field.  Populate it
+    # with a receipt/document number when the document has no invoice number.
+    if metadata["invoice_number"]["auto_value"] is None:
+        document_id = _first_document_id(features[0])
+        metadata["invoice_number"] = {"auto_value": document_id, "human_value": None,
+                                      "effective_value": document_id, "evidence_pages": []}
+    return metadata
 
 def reprocess_source(db, source_id):
     # A human intervention (including approval) is authoritative. Retain the
@@ -60,7 +79,7 @@ def reprocess_source(db, source_id):
         starts.append(len(rows))
         groups=[]
         for a,b in zip(starts, starts[1:]):
-            fs = features[a:b]; status = "review_required" if any(ev["decision"] == "review" for ev in evidences[a:b]) or len(_values(fs[0], "supplier_candidates")) == 0 and len(_values(fs[0], "invoice_number_candidates")) == 0 else "proposed"
+            fs = features[a:b]; status = "review_required" if any(ev["decision"] == "review" for ev in evidences[a:b]) or len(_values(fs[0], "supplier_candidates")) == 0 and not _document_ids(fs[0]) else "proposed"
             gid = db.execute("INSERT INTO document_groups(source_file_id,revision,status,algorithm_version,metadata_json,created_at) VALUES(?,?,?,?,?,?)", (source_id,revision,status,ALGORITHM_VERSION,json.dumps(_metadata(fs)),time.time())).lastrowid
             for seq, row in enumerate(rows[a:b], 1): db.execute("INSERT INTO group_pages(group_id,page_id,sequence) VALUES(?,?,?)", (gid,row["id"],seq))
             groups.append(gid)
