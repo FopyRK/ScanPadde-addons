@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.28 — 2026-09-28
+
+- Add an opt-in Google Drive intake through a local rclone profile: files are copied to the local inbox first and moved in Drive only after local hash archival and complete OCR.
+- Keep Drive OAuth credentials only in the Supervisor-provided add-on configuration directory; never store them in Git, SQLite, or the status API.
+
 ## 0.1.27 — 2026-09-28
 
 - Move fully processed inbox files into a local processed archive only after hash archival and complete OCR; incomplete and failed inputs remain in the inbox.

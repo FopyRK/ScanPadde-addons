@@ -32,6 +32,22 @@ class OllamaConfig:
     read_timeout: float = 180.0
 
 
+@dataclass(frozen=True)
+class DriveSyncConfig:
+    """Optional one-way Google Drive intake through a local rclone profile.
+
+    The profile carries the OAuth refresh token and is deliberately read only
+    by rclone from the Supervisor-provided app configuration mount.  No Drive
+    credential is ever copied to SQLite, process arguments, status output, or
+    the add-on repository.
+    """
+    enabled: bool = False
+    remote: str | None = None
+    inbox_path: str | None = None
+    processed_path: str | None = None
+    config_path: str | None = None
+
+
 def _ca_from_app_config(value: object, config_dir: Path) -> str | None:
     """Resolve a CA only within the Supervisor-provided app config mount."""
     if not isinstance(value, str) or not value:
@@ -105,3 +121,40 @@ def load_ollama_config(data_dir: Path) -> OllamaConfig:
     if not (enabled and url and model):
         return OllamaConfig()
     return OllamaConfig(enabled=True, url=url, model=model.strip())
+
+
+def _drive_path(value: object) -> str | None:
+    if not isinstance(value, str) or not value or len(value) > 300:
+        return None
+    candidate = value.strip().strip("/")
+    if not candidate or ":" in candidate or ".." in candidate.split("/"):
+        return None
+    return candidate
+
+
+def _drive_remote(value: object) -> str | None:
+    if not isinstance(value, str) or not value or len(value) > 64:
+        return None
+    remote = value.strip()
+    if not remote.replace("_", "").replace("-", "").isalnum():
+        return None
+    return remote
+
+
+def load_drive_sync_config(data_dir: Path, config_dir: Path = Path("/config")) -> DriveSyncConfig:
+    """Load an opt-in Drive import without reading OAuth material ourselves."""
+    values = {}
+    options = data_dir / "options.json"
+    if options.exists():
+        try:
+            values = json.loads(options.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            values = {}
+    enabled = values.get("drive_sync_enabled", False) is True
+    remote = _drive_remote(values.get("drive_remote"))
+    inbox_path = _drive_path(values.get("drive_inbox_path"))
+    processed_path = _drive_path(values.get("drive_processed_path"))
+    config_path = _ca_from_app_config(values.get("drive_rclone_config"), config_dir)
+    if not (enabled and remote and inbox_path and processed_path and config_path):
+        return DriveSyncConfig()
+    return DriveSyncConfig(True, remote, inbox_path, processed_path, config_path)

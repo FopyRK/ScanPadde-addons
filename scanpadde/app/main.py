@@ -13,7 +13,8 @@ from .db import connection, initialize, transaction
 from .ingestion import observe, execute
 from .paths import Paths
 from .storage import cleanup_temps, process_lock
-from .config import load_ocr_config, load_ollama_config
+from .config import load_ocr_config, load_ollama_config, load_drive_sync_config
+from .drive_sync import DriveSync
 from .features import extract
 from .ollama import OllamaClient, OllamaError, _input_digest
 from .remote_ocr import RemoteOcrClient, RemoteOcrError
@@ -33,6 +34,7 @@ class Runtime:
         self.lock = None
         self.ocr_config = load_ocr_config(paths.data)
         self.ollama_config = load_ollama_config(paths.data)
+        self.drive_sync = DriveSync(load_drive_sync_config(paths.data))
         self.remote_status = {"configured": False, "backend": "disabled", "online": None,
                               "worker_version": None, "tesseract_version": None, "languages": None,
                               "last_successful_contact": None}
@@ -42,6 +44,7 @@ class Runtime:
         import_handoff(self.paths, self.paths.data)
         self.ocr_config = load_ocr_config(self.paths.data)
         self.ollama_config = load_ollama_config(self.paths.data)
+        self.drive_sync = DriveSync(load_drive_sync_config(self.paths.data))
         self.lock = process_lock(self.paths.data)
         self.lock.__enter__()
         try:
@@ -64,7 +67,9 @@ class Runtime:
             with connection(self.db_path) as db:
                 while not self.stop.is_set():
                     try:
+                        self.drive_sync.pull(db, self.paths)
                         observe(db, self.paths)
+                        self.drive_sync.archive(db)
                         self.last_tick = time.time()
                         if self.stop.is_set():
                             break
@@ -176,6 +181,9 @@ def create_app(paths=None, background=True, allow_test_client=False):
                 "last_tick": runtime.last_tick,
                 "ollama": {"enabled": runtime.ollama_config.enabled,
                            "model": runtime.ollama_config.model},
+                "drive_sync": {"enabled": runtime.drive_sync.configured,
+                               "last_error": runtime.drive_sync.last_error,
+                               "last_successful_sync": runtime.drive_sync.last_successful_sync},
                 "remote_ocr": remote, "inbox": rows("SELECT state,count(*) AS count FROM inbox_entries GROUP BY state"),
                 "jobs": rows("SELECT state,count(*) AS count FROM jobs GROUP BY state")}
 

@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 from PIL import Image
 from app.remote_ocr import RemoteOcrClient, RemoteRejected, RemoteUnavailable, ocr_key, validate_response
-from app.config import OcrConfig, OllamaConfig, load_ocr_config, load_ollama_config
+from app.config import OcrConfig, OllamaConfig, DriveSyncConfig, load_ocr_config, load_ollama_config, load_drive_sync_config
 from app import jobs
 from app.ingestion import execute
 from test_phase2_ocr import page_with_image
@@ -96,6 +96,22 @@ def test_ocr_configuration_defaults_to_disabled(tmp_path):
 
 def test_ollama_configuration_is_opt_in_and_private_lan_only(tmp_path):
     assert load_ollama_config(tmp_path) == OllamaConfig()
+
+
+def test_drive_sync_requires_opt_in_and_a_local_rclone_config(tmp_path):
+    config_dir = tmp_path / "config"; config_dir.mkdir()
+    options = {"drive_sync_enabled": True, "drive_remote": "gdrive",
+               "drive_inbox_path": "Paddenwirt/ScanPadde V2/Eingang",
+               "drive_processed_path": "Paddenwirt/ScanPadde V2/Verarbeitet",
+               "drive_rclone_config": "rclone.conf"}
+    (tmp_path / "options.json").write_text(json.dumps(options))
+    assert load_drive_sync_config(tmp_path, config_dir) == DriveSyncConfig()
+    (config_dir / "rclone.conf").write_text("private-token")
+    config = load_drive_sync_config(tmp_path, config_dir)
+    assert config.enabled and config.remote == "gdrive" and config.config_path == str(config_dir / "rclone.conf")
+    options["drive_inbox_path"] = "../outside"
+    (tmp_path / "options.json").write_text(json.dumps(options))
+    assert load_drive_sync_config(tmp_path, config_dir) == DriveSyncConfig()
     (tmp_path / "options.json").write_text(json.dumps({"ollama_enabled": True,
         "ollama_url": "http://192.168.10.168:11434", "ollama_model": "qwen3"}))
     config = load_ollama_config(tmp_path)

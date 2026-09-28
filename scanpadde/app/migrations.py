@@ -64,12 +64,23 @@ CREATE TABLE learned_metadata_rules (
  created_at REAL NOT NULL,
  UNIQUE(field, normalized)
 );
-PRAGMA user_version=7;
+CREATE TABLE drive_entries (
+ remote_path TEXT PRIMARY KEY,
+ remote_id TEXT NOT NULL,
+ local_relative_path TEXT NOT NULL UNIQUE,
+ processed_remote_path TEXT NOT NULL UNIQUE,
+ state TEXT NOT NULL CHECK(state IN ('downloaded','moved','error')),
+ source_file_id INTEGER REFERENCES source_files(id),
+ last_error TEXT,
+ created_at REAL NOT NULL, updated_at REAL NOT NULL
+);
+CREATE INDEX drive_entries_source ON drive_entries(source_file_id,state);
+PRAGMA user_version=8;
 """
 
 def migrate(conn):
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version > 7:
+    if version > 8:
         raise RuntimeError("future_schema_rejected")
     if version == 0:
         conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nCOMMIT;")
@@ -188,4 +199,19 @@ def migrate(conn):
         INSERT INTO group_overrides SELECT * FROM group_overrides_old;
         DROP TABLE group_overrides_old;
         PRAGMA user_version=7;
+        COMMIT;""")
+    elif version == 7:
+        conn.executescript("""BEGIN IMMEDIATE;
+        CREATE TABLE drive_entries (
+          remote_path TEXT PRIMARY KEY,
+          remote_id TEXT NOT NULL,
+          local_relative_path TEXT NOT NULL UNIQUE,
+          processed_remote_path TEXT NOT NULL UNIQUE,
+          state TEXT NOT NULL CHECK(state IN ('downloaded','moved','error')),
+          source_file_id INTEGER REFERENCES source_files(id),
+          last_error TEXT,
+          created_at REAL NOT NULL, updated_at REAL NOT NULL
+        );
+        CREATE INDEX drive_entries_source ON drive_entries(source_file_id,state);
+        PRAGMA user_version=8;
         COMMIT;""")

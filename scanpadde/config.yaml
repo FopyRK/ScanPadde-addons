@@ -1,5 +1,5 @@
 name: ScanPadde V2
-version: "0.1.27"
+version: "0.1.28"
 slug: scanpadde_v2
 description: Local, persistent structural document intake. Experimental Phase 1A.
 arch:
@@ -31,6 +31,13 @@ options:
   ollama_enabled: false
   ollama_url: ""
   ollama_model: ""
+  # Optional Google Drive pull via /config/rclone.conf.  The file is local to
+  # the add-on and must never be added to Git.
+  drive_sync_enabled: false
+  drive_remote: "gdrive"
+  drive_inbox_path: "Paddenwirt/ScanPadde V2/Eingang"
+  drive_processed_path: "Paddenwirt/ScanPadde V2/Verarbeitet"
+  drive_rclone_config: "rclone.conf"
 schema:
   ocr_backend: list(disabled|local|remote)
   ocr_worker_url: str?
@@ -39,3 +46,8 @@ schema:
   ollama_enabled: bool
   ollama_url: str?
   ollama_model: str?
+  drive_sync_enabled: bool
+  drive_remote: str?
+  drive_inbox_path: str?
+  drive_processed_path: str?
+  drive_rclone_config: str?

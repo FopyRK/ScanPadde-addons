@@ -3,17 +3,18 @@
 Installation und Start ausschließlich nach separater Phase-1B-Freigabe.
 Autostart ist zunächst ausgeschaltet. Es gibt keine Optionen für alternative Hostpfade.
 
-Die App erzeugt `/share/scanpadde/{inbox,originals,failed,export}`.
+Die App erzeugt `/share/scanpadde/{inbox,processed,originals,failed,export}`.
 Nur synthetische PDF-, TIFF-, PNG- oder JPEG-Dateien direkt nach `inbox` kopieren.
 Unterverzeichnisse und Links werden nicht verarbeitet. Größe/mtime müssen mindestens
 15 Sekunden unverändert beobachtet werden; der Poll dauert 2 Sekunden.
 Das ist kein garantiertes Scanner-Fertig-Signal.
 
-Dateien bleiben im Eingang. Archivnamen sind SHA-256 ohne Dateiendung. Fehler werden
+Dateien bleiben bis zum vollständigen OCR-Lauf im Eingang. Danach werden sie lokal
+nach `processed` verschoben; das SHA-256-Originalarchiv bleibt erhalten. Fehler werden
 in SQLite und im Dashboard angezeigt; `failed` und `export` bleiben reservierte,
-leere Arbeitsordner. Es findet kein Verschieben statt. Unverändert fehlgeschlagene
-Dateien werden nicht endlos erneut versucht. Geänderter Inhalt mit neuer Größe/mtime
-führt nach erneuter Stabilisierung zu einer neuen Beobachtung.
+leere Arbeitsordner. Unverändert fehlgeschlagene Dateien werden nicht endlos erneut
+versucht. Geänderter Inhalt mit neuer Größe/mtime führt nach erneuter Stabilisierung
+zu einer neuen Beobachtung.
 
 Die Oberfläche zeigt System/DB/Worker, Inbox-/Job-Zahlen und die jüngsten 100 Quellen.
 Die API bietet limit/offset (maximal 500) für Quellen und Jobs. Nur GET-Lesezugriffe.

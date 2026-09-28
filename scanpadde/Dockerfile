@@ -3,7 +3,7 @@ LABEL io.hass.version="0.1.12" io.hass.type="app" io.hass.arch="amd64"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /opt/scanpadde
 COPY requirements.txt ./
-RUN apk add --no-cache tesseract-ocr tesseract-ocr-data-deu tesseract-ocr-data-eng poppler-utils \
+RUN apk add --no-cache tesseract-ocr tesseract-ocr-data-deu tesseract-ocr-data-eng poppler-utils rclone \
  && pip install --no-cache-dir --only-binary=:all: -r requirements.txt
 COPY app ./app
 COPY run.sh /run.sh
