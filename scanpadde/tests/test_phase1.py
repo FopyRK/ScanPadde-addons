@@ -429,6 +429,7 @@ def test_health_status_sources_jobs_and_ingress(env):
         assert 'href="static/style.css"' in html
         assert "https://" not in html
         assert client.get("/static/style.css").status_code == 200
+        assert client.get("/static/drive-setup.js").status_code == 200
         assert client.post("/api/sources").status_code == 405
         paths.guard("export").rmdir()
         assert client.get("/api/health").status_code == 503

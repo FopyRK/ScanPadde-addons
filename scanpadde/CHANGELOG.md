@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.36 — 2026-09-28
+
+- Fix delivery of the Drive-connection setup script so the private `rclone.conf` upload form works in the ScanPadde interface.
+
 ## 0.1.35 — 2026-09-28
 
 - Add a Drive-connection upload in the ScanPadde interface. It stores only a validated `rclone.conf` in the add-on's private configuration mount, never in the shared Home Assistant configuration folder, Git, SQLite, or the status API.

@@ -547,6 +547,9 @@ def create_app(paths=None, background=True, allow_test_client=False, config_dir=
     @app.get("/static/source-delete.js")
     def source_delete_js(): return FileResponse(ASSETS / "static/source-delete.js", media_type="application/javascript")
 
+    @app.get("/static/drive-setup.js")
+    def drive_setup_js(): return FileResponse(ASSETS / "static/drive-setup.js", media_type="application/javascript")
+
     @app.get("/review/{source_id}", response_class=HTMLResponse)
     def review(source_id: int):
         if not rows("SELECT id FROM source_files WHERE id=?", (source_id,)): raise HTTPException(404, "source_not_found")
