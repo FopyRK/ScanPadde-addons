@@ -124,6 +124,22 @@ def test_approved_source_delete_is_protected(env):
         assert client.post(f"/api/sources/{source_id}/delete", json={"confirm": True}).status_code == 409
     assert db.execute("SELECT count(*) FROM source_files").fetchone()[0] == 1
 
+def test_drive_config_upload_stays_in_private_addon_config(env, tmp_path):
+    paths, _ = env
+    private_config = tmp_path / "private-addon-config"
+    private_config.mkdir()
+    (paths.data / "options.json").write_text(json.dumps({
+        "drive_sync_enabled": True, "drive_remote": "gdrive",
+        "drive_inbox_path": "Paddenwirt/ScanPadde V2/Eingang",
+        "drive_processed_path": "Paddenwirt/ScanPadde V2/Verarbeitet",
+        "drive_rclone_config": "rclone.conf"}), encoding="utf-8")
+    app = create_app(paths, background=False, allow_test_client=True, config_dir=private_config)
+    with TestClient(app) as client:
+        response = client.post("/api/drive/config", content=b"[gdrive]\ntype = drive\ntoken = private\n")
+        assert response.json() == {"ok": True, "enabled": True}
+        assert client.post("/api/drive/config", content=b"[other]\ntype = drive\n").status_code == 422
+    assert (private_config / "rclone.conf").read_text(encoding="utf-8").startswith("[gdrive]")
+
 def test_local_handoff_preserves_database_and_options(tmp_path):
     source_paths = Paths(tmp_path / "share/scanpadde", tmp_path / "source-data")
     source_paths.initialize()

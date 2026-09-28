@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.35 — 2026-09-28
+
+- Add a Drive-connection upload in the ScanPadde interface. It stores only a validated `rclone.conf` in the add-on's private configuration mount, never in the shared Home Assistant configuration folder, Git, SQLite, or the status API.
+
 ## 0.1.34 — 2026-09-28
 
 - Allow a locally confirmed deletion of unreviewed test sources, including their local original, rendered-page, and OCR records. Sources containing approved documents remain protected.

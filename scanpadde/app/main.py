@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import threading
 import time
 from contextlib import asynccontextmanager, closing
@@ -13,7 +14,7 @@ from .db import connection, initialize, transaction
 from .ingestion import observe, execute
 from .paths import Paths
 from .storage import cleanup_temps, process_lock
-from .config import load_ocr_config, load_ollama_config, load_drive_sync_config
+from .config import load_ocr_config, load_ollama_config, load_drive_sync_config, _drive_remote
 from .drive_sync import DriveSync
 from .features import extract
 from .ollama import OllamaClient, OllamaError, _input_digest
@@ -24,17 +25,18 @@ from .handoff import export_handoff, import_handoff
 ASSETS = Path(__file__).parent
 
 class Runtime:
-    def __init__(self, paths):
+    def __init__(self, paths, config_dir=Path("/config")):
         self.paths = paths
+        self.config_dir = Path(config_dir)
         self.db_path = paths.data / "scanpadde.db"
         self.stop = threading.Event()
         self.worker = None
         self.state = "stopped"
         self.last_tick = None
         self.lock = None
-        self.ocr_config = load_ocr_config(paths.data)
+        self.ocr_config = load_ocr_config(paths.data, self.config_dir)
         self.ollama_config = load_ollama_config(paths.data)
-        self.drive_sync = DriveSync(load_drive_sync_config(paths.data))
+        self.drive_sync = DriveSync(load_drive_sync_config(paths.data, self.config_dir))
         self.remote_status = {"configured": False, "backend": "disabled", "online": None,
                               "worker_version": None, "tesseract_version": None, "languages": None,
                               "last_successful_contact": None}
@@ -42,9 +44,9 @@ class Runtime:
     def start(self, background=True):
         self.paths.initialize()
         import_handoff(self.paths, self.paths.data)
-        self.ocr_config = load_ocr_config(self.paths.data)
+        self.ocr_config = load_ocr_config(self.paths.data, self.config_dir)
         self.ollama_config = load_ollama_config(self.paths.data)
-        self.drive_sync = DriveSync(load_drive_sync_config(self.paths.data))
+        self.drive_sync = DriveSync(load_drive_sync_config(self.paths.data, self.config_dir))
         self.lock = process_lock(self.paths.data)
         self.lock.__enter__()
         try:
@@ -115,7 +117,7 @@ class Runtime:
         self.remote_status = result
         return result
 
-def create_app(paths=None, background=True, allow_test_client=False):
+def create_app(paths=None, background=True, allow_test_client=False, config_dir=Path("/config")):
     """Create the production app.
 
     ``allow_test_client`` is deliberately an in-process construction option,
@@ -123,7 +125,7 @@ def create_app(paths=None, background=True, allow_test_client=False):
     the Home-Assistant ingress peer check.  It exists solely for the isolated
     synthetic browser harness.
     """
-    runtime = Runtime(paths or Paths())
+    runtime = Runtime(paths or Paths(), config_dir)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -186,6 +188,44 @@ def create_app(paths=None, background=True, allow_test_client=False):
                                "last_successful_sync": runtime.drive_sync.last_successful_sync},
                 "remote_ocr": remote, "inbox": rows("SELECT state,count(*) AS count FROM inbox_entries GROUP BY state"),
                 "jobs": rows("SELECT state,count(*) AS count FROM jobs GROUP BY state")}
+
+    @app.post("/api/drive/config")
+    async def upload_drive_config(request: Request):
+        """Store only a validated rclone profile in this add-on's private config mount."""
+        body = await request.body()
+        if not body or len(body) > 256 * 1024 or b"\0" in body:
+            raise HTTPException(422, "invalid_drive_config")
+        try:
+            text = body.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(422, "invalid_drive_config") from exc
+        # The configured remote must be a Drive profile.  This is deliberately
+        # narrow: the endpoint must not turn ScanPadde into a generic uploader.
+        remote = None
+        try:
+            options = json.loads((runtime.paths.data / "options.json").read_text(encoding="utf-8"))
+            remote = _drive_remote(options.get("drive_remote"))
+        except (OSError, ValueError, AttributeError):
+            pass
+        if not remote or f"[{remote}]" not in text or "type = drive" not in text:
+            raise HTTPException(422, "invalid_drive_config")
+        runtime.config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        destination = runtime.config_dir / "rclone.conf"
+        temporary = runtime.config_dir / ".rclone.conf.tmp"
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(descriptor, "wb") as output:
+                output.write(body)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, destination)
+            os.chmod(destination, 0o600)
+        finally:
+            temporary.unlink(missing_ok=True)
+        runtime.drive_sync = DriveSync(load_drive_sync_config(runtime.paths.data, runtime.config_dir))
+        if not runtime.drive_sync.configured:
+            raise HTTPException(409, "drive_not_enabled")
+        return {"ok": True, "enabled": True}
 
     @app.get("/api/sources")
     def sources(limit: int = 100, offset: int = 0):
