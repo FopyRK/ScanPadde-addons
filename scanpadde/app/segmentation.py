@@ -117,7 +117,20 @@ def _metadata(features):
         document_id = _first_document_id(features)
         metadata["invoice_number"] = {"auto_value": document_id, "human_value": None,
                                       "effective_value": document_id, "evidence_pages": []}
+    metadata["display_name"] = {"auto_value": _display_name(metadata), "human_value": None,
+                                "effective_value": _display_name(metadata), "evidence_pages": []}
     return metadata
+
+def _display_name(metadata):
+    """A readable review label; it is a suggestion, not an export filename."""
+    def value(field):
+        item = metadata.get(field, {})
+        return (item.get("human_value") or item.get("effective_value") or item.get("auto_value") or {}).get("value")
+    document_type = {"invoice": "Rechnung", "receipt": "Kassenbon", "delivery_note": "Lieferschein",
+                     "credit_note": "Gutschrift", "offer": "Angebot", "purchase_order": "Bestellung"}.get(value("document_type"), value("document_type"))
+    parts = [part for part in (document_type, value("supplier"), value("invoice_number")) if part]
+    return {"value": " · ".join(parts) if parts else "Unbenanntes Dokument",
+            "normalized": "display_name", "source": "generated_label", "evidence": "review_metadata"}
 
 def _enrich_metadata(metadata, features):
     """Fill only empty automatic fields in a review response, never overrides.
@@ -130,7 +143,18 @@ def _enrich_metadata(metadata, features):
     for field, value in metadata.items():
         if value.get("human_value") is None and value.get("effective_value") is None:
             metadata[field] = inferred[field]
+    if "display_name" not in metadata:
+        metadata["display_name"] = {"auto_value": _display_name(metadata), "human_value": None,
+                                    "effective_value": _display_name(metadata), "evidence_pages": []}
+    elif metadata["display_name"].get("human_value") is None:
+        metadata["display_name"]["auto_value"] = _display_name(metadata)
+        metadata["display_name"]["effective_value"] = metadata["display_name"]["auto_value"]
     return metadata
+
+def group_display_name(metadata):
+    """Return the human review label for overview lists without changing data."""
+    item = metadata.get("display_name") or _display_name(metadata)
+    return (item.get("human_value") or item.get("effective_value") or item.get("auto_value") or {}).get("value", "Unbenanntes Dokument")
 
 def reprocess_source(db, source_id):
     # A human intervention (including approval) is authoritative. Retain the
@@ -234,6 +258,10 @@ def override(db, source_id, action, payload):
             g=db.execute("SELECT * FROM document_groups WHERE id=?", (payload["group_id"],)).fetchone()
             if not g or g["source_file_id"] != source_id: raise ValueError("group_not_found")
             m=json.loads(g["metadata_json"]); field=payload["field"]
+            if field == "display_name" and field not in m:
+                generated = _display_name(m)
+                m[field] = {"auto_value": generated, "human_value": None,
+                            "effective_value": generated, "evidence_pages": []}
             if field not in m: raise ValueError("metadata_field_invalid")
             m[field]["human_value"]={"value":payload["value"],"source":"human_override"}; m[field]["effective_value"]=m[field]["human_value"]
             db.execute("UPDATE document_groups SET metadata_json=?,status='review_required' WHERE id=?", (json.dumps(m),g["id"]))

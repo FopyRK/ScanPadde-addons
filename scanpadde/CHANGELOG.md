@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.26 — 2026-09-28
+
+- Show each source's document names and review progress in the overview; generate readable names from document type, supplier, and invoice number, with an optional manual name override.
+
 ## 0.1.25 — 2026-09-28
 
 - Allow reviewers to reorder pages within a group and to hide a blank page from that group without deleting the original or OCR record.

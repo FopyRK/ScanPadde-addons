@@ -143,3 +143,12 @@ def test_review_can_reorder_and_exclude_pages_without_deleting_ocr(env):
     override(db, sid, 'exclude_page', {'group_id': group, 'page_id': blank})
     assert [item['id'] for item in group_detail(db, group)['pages']] == [second, first]
     assert db.execute('SELECT count(*) FROM ocr_results WHERE page_id=?', (blank,)).fetchone()[0] == 1
+
+def test_group_name_is_generated_and_can_be_overridden(env):
+    _, db = env
+    sid = source(db, 1)
+    page(db, sid, 1, 'ACME GmbH\nRechnung Nr: A-1')
+    group = reprocess_source(db, sid)[0]
+    assert group_detail(db, group)['metadata_json']['display_name']['effective_value']['value'] == 'Rechnung · ACME GmbH · A-1'
+    override(db, sid, 'metadata', {'group_id': group, 'field': 'display_name', 'value': 'April-Rechnung'})
+    assert group_detail(db, group)['metadata_json']['display_name']['effective_value']['value'] == 'April-Rechnung'

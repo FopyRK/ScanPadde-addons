@@ -17,7 +17,7 @@ from .config import load_ocr_config, load_ollama_config
 from .features import extract
 from .ollama import OllamaClient, OllamaError, _input_digest
 from .remote_ocr import RemoteOcrClient, RemoteOcrError
-from .segmentation import reprocess_source, group_detail, override, apply_ollama_suggestion, _known_entities
+from .segmentation import reprocess_source, group_detail, override, apply_ollama_suggestion, _known_entities, group_display_name
 from .handoff import export_handoff, import_handoff
 
 ASSETS = Path(__file__).parent
@@ -409,13 +409,32 @@ def create_app(paths=None, background=True, allow_test_client=False):
         queue = {r["state"]: r["count"] for r in s["jobs"]}
         ocr_done = {r["source_file_id"]: r["count"] for r in rows(
             "SELECT source_file_id,count(*) AS count FROM pages WHERE status='ocr_completed' GROUP BY source_file_id")}
-        table = "".join("<tr>" + "".join("<td>" + escape(str(v)) + "</td>" for v in (
-            r["id"], r["original_filename"], r["sha256"][:12], r["page_count"],
-            r["status"], f"OCR {ocr_done.get(r['id'], 0)} / {r['page_count']}", __import__("datetime").datetime.fromtimestamp(r["first_seen_at"],
-            __import__("datetime").timezone.utc).isoformat())) +
-            (f'<td><form action="api/sources/{r["id"]}/retry-ocr" method="post"><button type="submit">OCR nachholen</button></form> '
-             if ocr_done.get(r["id"], 0) < r["page_count"] else '<td>') +
-            f'<a href="review/{r["id"]}">Analyse &amp; Review</a></td></tr>' for r in sources())
+        group_rows = rows("""SELECT source_file_id,status,metadata_json FROM document_groups
+                           WHERE status NOT IN ('superseded','rejected') ORDER BY source_file_id,id""")
+        review_summary = {}
+        for group in group_rows:
+            metadata = json.loads(group["metadata_json"] or "{}")
+            review_summary.setdefault(group["source_file_id"], []).append({
+                "status": group["status"], "name": group_display_name(metadata)})
+        def review_cell(source_id):
+            groups = review_summary.get(source_id, [])
+            if not groups:
+                return "<span>noch nicht analysiert</span>"
+            approved = sum(group["status"] == "approved" for group in groups)
+            open_groups = len(groups) - approved
+            status = f"{approved} von {len(groups)} freigegeben" if not open_groups else f"{approved} freigegeben · {open_groups} offen"
+            names = "".join(f"<li>{escape(group['name'])} · {escape('freigegeben' if group['status'] == 'approved' else 'offen')}</li>" for group in groups)
+            return f"<strong>{escape(status)}</strong><details><summary>{len(groups)} Dokumente anzeigen</summary><ul>{names}</ul></details>"
+        def source_row(source):
+            captured = __import__("datetime").datetime.fromtimestamp(source["first_seen_at"], __import__("datetime").timezone.utc).isoformat()
+            retry = (f'<form action="api/sources/{source["id"]}/retry-ocr" method="post"><button type="submit">OCR nachholen</button></form> '
+                     if ocr_done.get(source["id"], 0) < source["page_count"] else "")
+            return (f"<tr><td>{source['id']}</td><td>{escape(source['original_filename'])}</td>"
+                    f"<td>{review_cell(source['id'])}</td><td>{escape(source['sha256'][:12])}</td>"
+                    f"<td>{source['page_count']}</td><td>{escape(source['status'])}</td>"
+                    f"<td>OCR {ocr_done.get(source['id'], 0)} / {source['page_count']}</td><td>{escape(captured)}</td>"
+                    f"<td>{retry}<a href=\"review/{source['id']}\">Analyse &amp; Review</a></td></tr>")
+        table = "".join(source_row(source) for source in sources())
         template = (ASSETS / "templates/index.html").read_text(encoding="utf-8")
         return template.replace("{{version}}", VERSION).replace("{{health}}", escape(
             f"System: {s['app']} | Datenbank: {s['database']} | Arbeitsverzeichnis: {s['workspace']} | Worker: {s['worker']} | Remote OCR: {s['remote_ocr']['backend']} / {s['remote_ocr']['online']}")).replace(
