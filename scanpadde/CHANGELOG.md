@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.23 — 2026-09-28
+
+- Detect supplier legal forms in inline OCR, accept hyphenated invoice labels,
+  and show the proposed invoice or document date in the review.
+
 ## 0.1.22 — 2026-09-28
 
 - Open each review-page preview in a readable, closable full-page overlay

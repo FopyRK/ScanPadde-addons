@@ -27,6 +27,12 @@ def test_feature_extraction_handles_tax_keyword_without_capture_group():
     features = extract('USt 19 Prozent')
     assert features['vat_tax_candidates'][0]['value'].lower().startswith('ust')
 
+def test_feature_extraction_finds_inline_supplier_and_hyphenated_invoice_label():
+    features = extract('ALPHA Handel GmbH & Co. KG Rechnung-Nr.: R-123 Datum 01.02.2026')
+    assert features['supplier_candidates'][0]['normalized'].endswith('GMBH & CO. KG')
+    assert features['invoice_number_candidates'][0]['normalized'] == 'R123'
+    assert features['date_candidates'][0]['normalized'] == '01.02.2026'
+
 def test_boundary_switch_and_continuation():
     a=extract('ACME GmbH\nRechnung Nr: A1\nSeite 1 von 2')
     b=extract('ACME GmbH\nRechnung Nr: A1\nSeite 2 von 2')

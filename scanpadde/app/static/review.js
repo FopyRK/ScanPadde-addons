@@ -4,7 +4,7 @@
   const out = document.querySelector('#groups');
   const state = document.querySelector('#state');
   const esc = value => String(value ?? '—').replace(/[&<>]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[char]));
-  const metadataFields = [['supplier', 'Lieferant'], ['invoice_number', 'Rechnungsnr.'], ['document_type', 'Dokumenttyp']];
+  const metadataFields = [['supplier', 'Lieferant'], ['invoice_number', 'Rechnungsnr.'], ['invoice_date', 'Rechnungs-/Belegdatum'], ['document_type', 'Dokumenttyp']];
   const statusText = {proposed: 'vorgeschlagen', review_required: 'Prüfung erforderlich', approved: 'freigegeben', rejected: 'verworfen'};
   const preview = document.createElement('dialog');
   preview.className = 'seitenvorschau';
@@ -45,7 +45,7 @@
         const item = evidence.find(entry => entry.after_page_id === page.id);
         return `<p class="boundary">Trennung nach Seite ${page.page_number}: ${esc(item?.evidence_json || 'keine Hinweise')}</p>`;
       }).join('');
-      card.innerHTML = `<h2>Gruppe ${group.id} · <span class="group-status">${esc(statusText[group.status] || group.status)}</span></h2><p class="pages">${detail.pages.map(page => `Seite ${page.page_number}`).join(', ')}</p><div class="page-cards">${pageCards}</div><p class="metadata">Lieferant: <span data-field="supplier">${esc(metadata.supplier.effective_value?.value)}</span> · Rechnungsnr.: <span data-field="invoice_number">${esc(metadata.invoice_number.effective_value?.value)}</span> · Typ: <span data-field="document_type">${esc(metadata.document_type.effective_value?.value)}</span></p>${boundaries}<button data-a="split">Vor Seite trennen …</button> <button data-a="merge">Mit vorheriger Gruppe zusammenführen</button> <button data-a="move">Seite verschieben …</button> ${metadataFields.map(([field, label]) => `<button data-a="edit" data-field="${field}">${label} bearbeiten</button>`).join(' ')} <button data-a="approve">Gruppe freigeben</button> <button data-a="review">Prüfung erforderlich markieren</button>`;
+      card.innerHTML = `<h2>Gruppe ${group.id} · <span class="group-status">${esc(statusText[group.status] || group.status)}</span></h2><p class="pages">${detail.pages.map(page => `Seite ${page.page_number}`).join(', ')}</p><div class="page-cards">${pageCards}</div><p class="metadata">Lieferant: <span data-field="supplier">${esc(metadata.supplier.effective_value?.value)}</span> · Rechnungsnr.: <span data-field="invoice_number">${esc(metadata.invoice_number.effective_value?.value)}</span> · Datum: <span data-field="invoice_date">${esc(metadata.invoice_date.effective_value?.value)}</span> · Typ: <span data-field="document_type">${esc(metadata.document_type.effective_value?.value)}</span></p>${boundaries}<button data-a="split">Vor Seite trennen …</button> <button data-a="merge">Mit vorheriger Gruppe zusammenführen</button> <button data-a="move">Seite verschieben …</button> ${metadataFields.map(([field, label]) => `<button data-a="edit" data-field="${field}">${label} bearbeiten</button>`).join(' ')} <button data-a="approve">Gruppe freigeben</button> <button data-a="review">Prüfung erforderlich markieren</button>`;
       card.onclick = async event => {
         const pageCard = event.target.closest('.page-card');
         if (pageCard) {

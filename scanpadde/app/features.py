@@ -54,7 +54,7 @@ def extract(text, words_json=None, width=None, height=None, known_entities=None)
             result.append(_candidate(value, source, match.group(0),
                                      normalized=(normalizer(value) if normalizer else None)))
         return result
-    invoices = matches(r"(?:rechnung(?:s)?\s*(?:nummer|nr\.?|no\.?)|invoice(?:\s*(?:no\.?|number))?)\s*[:#]?\s*([A-Z0-9][A-Z0-9 /_-]{2,})", "invoice_label", normalize_invoice)
+    invoices = matches(r"(?:rechnung(?:s)?[-\s]*(?:nummer|nr\.?|no\.?)|invoice[-\s]*(?:no\.?|number))\s*[:#]?\s*([A-Z0-9]+(?:\s*[-/_]\s*[A-Z0-9]+)*)", "invoice_label", normalize_invoice)
     # Retail OCR commonly misreads the final letters of ``Belegnummer`` and
     # may put ``Belegdatum`` between its label and the numeric identifier.
     # A long numeric token near that label remains clear, auditable evidence.
@@ -85,16 +85,32 @@ def extract(text, words_json=None, width=None, height=None, known_entities=None)
         if y < height * .45 and x < width * .5: regions["left_address"].append(word)
         if y < height * .45 and x >= width * .5: regions["right_address"].append(word)
     suppliers, recipients = [], []
-    org_lines = [l for l in lines if re.search(r"\b(GMBH|AG|KG|LTD|LLC|UG|E\.K\.)\b", l, re.I)]
+    organization_pattern = r"(?<!\w)([A-ZÄÖÜ][A-ZÄÖÜa-zäöüß0-9&.,' -]{1,90}?\b(?:GmbH|AG|KG|LTD|LLC|UG|E\.K\.)\b(?:\s*(?:&|und)\s*Co\.?\s*KG)?)"
     for index, line in enumerate(lines):
-        if line not in org_lines: continue
-        candidate = _candidate(line, "organization_line", line)
+        organization = re.search(organization_pattern, line)
+        if not organization: continue
+        candidate = _candidate(organization.group(1).strip(), "organization_line", organization.group(0))
         context = " ".join(lines[max(0, index - 1):index + 1]).lower()
         if re.search(r"(?:rechnungsempfänger|bill to|kunde|customer|\ban)\s*:?", context):
             candidate["value"] = re.sub(r"^.*?(?:rechnungsempfänger|bill to|kunde|customer|\ban)\s*:?\s*", "", line, flags=re.I)
             candidate["normalized"] = _norm(candidate["value"])
             recipients.append(candidate)
         else: suppliers.append(candidate)
+    # Scanned invoices frequently arrive as one long OCR line although the
+    # rendered page visibly contains several text blocks.  Preserve the same
+    # legal-form evidence as above, but find it directly in that inline OCR.
+    # This is still a transparent local rule, not a guessed supplier name.
+    known_organizations = {_norm(candidate["value"]) for candidate in suppliers + recipients}
+    for match in re.finditer(organization_pattern, text):
+        candidate = _candidate(match.group(1).strip(), "organization_inline", match.group(0))
+        if candidate["normalized"] in known_organizations:
+            continue
+        nearby = text[max(0, match.start() - 80):match.start()].lower()
+        if re.search(r"(?:rechnungsempfänger|bill to|kunde|customer|\ban)\s*:?\s*$", nearby):
+            recipients.append(candidate)
+        else:
+            suppliers.append(candidate)
+        known_organizations.add(candidate["normalized"])
     for alias in known_entities.get("recipient_aliases", []):
         if alias.lower() in lowered: recipients.append(_candidate(alias, "known_recipient", alias))
     for alias in known_entities.get("supplier_aliases", []):
