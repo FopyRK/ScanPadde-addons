@@ -31,7 +31,10 @@ def _page_summary(page: dict) -> dict:
         "page_counters": values("page_number_candidates"),
         "document_types": values("probable_document_type"),
         "blankness": features.get("blankness"),
-        "ocr_excerpt": page["text"][:1400],
+        # Keep the local-model prompt proportionate even for long scanner
+        # batches.  The extracted candidates carry the primary identity
+        # evidence; this short excerpt only provides limited layout context.
+        "ocr_excerpt": page["text"][:320],
     }
 
 
@@ -94,7 +97,7 @@ class OllamaClient:
         try:
             connection = connection_type(target.hostname, target.port, timeout=self.config.connect_timeout)
             body = json.dumps({"model": self.config.model, "prompt": prompt, "stream": False,
-                               "format": "json", "options": {"temperature": 0}}).encode("utf-8")
+                               "format": "json", "options": {"temperature": 0, "num_predict": 512}}).encode("utf-8")
             connection.request("POST", "/api/generate", body=body,
                                headers={"Content-Type": "application/json", "Content-Length": str(len(body))})
             # HTTPConnection's constructor timeout also governs response reads.

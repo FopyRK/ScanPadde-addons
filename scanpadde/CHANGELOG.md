@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.14 — 2026-09-28
+
+- Bound the local Ollama prompt to compact page evidence and its response to a
+  small structured grouping result, so large review stacks remain practical.
+
 ## 0.1.13 — 2026-09-28
 
 - Keep the short connection timeout for local Ollama while allowing the
