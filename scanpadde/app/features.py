@@ -55,6 +55,15 @@ def extract(text, words_json=None, width=None, height=None, known_entities=None)
                                      normalized=(normalizer(value) if normalizer else None)))
         return result
     invoices = matches(r"(?:rechnung(?:s)?[-\s]*(?:nummer|nr\.?|no\.?)|invoice[-\s]*(?:no\.?|number))\s*[:#]?\s*([A-Z0-9]+(?:\s*[-/_]\s*[A-Z0-9]+)*)", "invoice_label", normalize_invoice)
+    # A reviewer may confirm a previously unseen, *labelled* invoice format.
+    # Only the short label is learned locally; invoice values are never reused
+    # as a rule because each new document necessarily has a different value.
+    for label in known_entities.get("invoice_labels", []):
+        label = str(label).strip()
+        if not label or len(label) > 80:
+            continue
+        invoices.extend(matches(r"(?:" + re.escape(label) + r")\s*[:#]?\s*([A-Z0-9]+(?:\s*[-/_]\s*[A-Z0-9]+)*)",
+                                "learned_invoice_label", normalize_invoice))
     # Retail OCR commonly misreads the final letters of ``Belegnummer`` and
     # may put ``Belegdatum`` between its label and the numeric identifier.
     # A long numeric token near that label remains clear, auditable evidence.

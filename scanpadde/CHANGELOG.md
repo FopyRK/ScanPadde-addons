@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.24 — 2026-09-28
+
+- Learn locally confirmed supplier aliases and labelled invoice-number formats from manual review entries; no OCR text, documents, or rules leave ScanPadde.
+
 ## 0.1.23 — 2026-09-28
 
 - Detect supplier legal forms in inline OCR, accept hyphenated invoice labels,

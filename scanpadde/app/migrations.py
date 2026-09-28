@@ -55,12 +55,21 @@ CREATE TABLE ollama_grouping_suggestions (
  model TEXT NOT NULL, input_digest TEXT NOT NULL, suggestion_json TEXT NOT NULL,
  created_at REAL NOT NULL
 );
-PRAGMA user_version=5;
+CREATE TABLE learned_metadata_rules (
+ id INTEGER PRIMARY KEY,
+ field TEXT NOT NULL CHECK(field IN ('supplier','invoice_label')),
+ normalized TEXT NOT NULL,
+ value TEXT NOT NULL,
+ source_group_id INTEGER REFERENCES document_groups(id),
+ created_at REAL NOT NULL,
+ UNIQUE(field, normalized)
+);
+PRAGMA user_version=6;
 """
 
 def migrate(conn):
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if version > 5:
+    if version > 6:
         raise RuntimeError("future_schema_rejected")
     if version == 0:
         conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA + "\nCOMMIT;")
@@ -154,4 +163,17 @@ def migrate(conn):
         INSERT INTO group_overrides SELECT * FROM group_overrides_old;
         DROP TABLE group_overrides_old;
         PRAGMA user_version=5;
+        COMMIT;""")
+    elif version == 5:
+        conn.executescript("""BEGIN IMMEDIATE;
+        CREATE TABLE learned_metadata_rules (
+          id INTEGER PRIMARY KEY,
+          field TEXT NOT NULL CHECK(field IN ('supplier','invoice_label')),
+          normalized TEXT NOT NULL,
+          value TEXT NOT NULL,
+          source_group_id INTEGER REFERENCES document_groups(id),
+          created_at REAL NOT NULL,
+          UNIQUE(field, normalized)
+        );
+        PRAGMA user_version=6;
         COMMIT;""")

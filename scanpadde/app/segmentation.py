@@ -1,9 +1,56 @@
 """Deterministic grouping with explicit evidence and auditable human overrides."""
-import json, time
+import json, re, time
 from .db import transaction
 from .features import extract, FEATURE_VERSION
 
 ALGORITHM_VERSION = "phase3-segmentation-v2"
+
+def _known_entities(db):
+    """Return only locally confirmed, reusable labels; never OCR text."""
+    rows = db.execute("SELECT field,value FROM learned_metadata_rules ORDER BY id").fetchall()
+    return {
+        "supplier_aliases": [row["value"] for row in rows if row["field"] == "supplier"],
+        "invoice_labels": [row["value"] for row in rows if row["field"] == "invoice_label"],
+    }
+
+def _remember_invoice_label(db, group_id, value):
+    """Learn a short generic label only when the confirmed number occurs in OCR."""
+    normalized = re.sub(r"[\s-]+", "", str(value)).upper()
+    if len(normalized) < 2:
+        return
+    pages = db.execute("""SELECT o.text FROM group_pages gp
+        JOIN ocr_results o ON o.page_id=gp.page_id AND o.status='completed'
+        WHERE gp.group_id=? ORDER BY gp.sequence""", (group_id,)).fetchall()
+    token = r"[\s\-/_]*".join(re.escape(char) for char in normalized)
+    for page in pages:
+        text = page["text"] or ""
+        match = re.search(token, text, re.I)
+        if not match:
+            continue
+        prefix = text[max(0, match.start() - 80):match.start()]
+        label_match = re.search(r"([A-Za-zÄÖÜäöüß]+(?:[\s-]+[A-Za-zÄÖÜäöüß]+){0,2})\s*[:#-]*\s*$", prefix)
+        if not label_match:
+            continue
+        label = re.sub(r"\s+", " ", label_match.group(1)).strip()
+        words = re.findall(r"[A-Za-zÄÖÜäöüß]+(?:[-.][A-Za-zÄÖÜäöüß]+)?", label)
+        marker = next((index for index, word in enumerate(words)
+                       if re.search(r"(?:nummer|nr\.?|no\.?|beleg|invoice|referenz|vorgang)", word, re.I)), None)
+        if marker is None:
+            continue
+        # The OCR prefix can contain a supplier name on the same line.  Keep
+        # the actual label, optionally with its immediately preceding word
+        # (for forms such as "Rechnung Nr."), never the company name.
+        is_short_marker = re.fullmatch(r"(?:nr\.?|no\.?)", words[marker], re.I)
+        start = marker - 1 if marker and is_short_marker else marker
+        label = " ".join(words[start:])
+        db.execute("""INSERT INTO learned_metadata_rules(field,normalized,value,source_group_id,created_at)
+            VALUES(?,?,?,?,?) ON CONFLICT(field,normalized) DO NOTHING""",
+                   ("invoice_label", _norm_rule(label), label, group_id, time.time()))
+        return
+
+def _norm_rule(value):
+    return re.sub(r"\s+", " ", value.strip()).upper()
+
 def _values(f, name): return {x["normalized"] for x in f.get(name, []) if x.get("normalized")}
 def _first(f, name): return (f.get(name) or [None])[0]
 
@@ -86,10 +133,10 @@ def reprocess_source(db, source_id):
         return [g["id"] for g in active]
     rows = db.execute("""SELECT p.*, o.text, o.words_json FROM pages p LEFT JOIN ocr_results o ON o.id=(SELECT id FROM ocr_results WHERE page_id=p.id AND status='completed' ORDER BY created_at DESC LIMIT 1) WHERE p.source_file_id=? ORDER BY p.page_number""", (source_id,)).fetchall()
     if not rows: return []
-    features = []
+    features, known_entities = [], _known_entities(db)
     with transaction(db):
         for row in rows:
-            f = extract(row["text"] or "", row["words_json"], row["width"], row["height"])
+            f = extract(row["text"] or "", row["words_json"], row["width"], row["height"], known_entities)
             db.execute("INSERT INTO page_features(page_id,feature_version,data_json,created_at) VALUES(?,?,?,?) ON CONFLICT(page_id) DO UPDATE SET feature_version=excluded.feature_version,data_json=excluded.data_json,created_at=excluded.created_at", (row["id"], FEATURE_VERSION, json.dumps(f), time.time()))
             features.append(f)
         for g in db.execute("SELECT id FROM document_groups WHERE source_file_id=? AND status IN ('proposed','review_required')", (source_id,)): db.execute("UPDATE document_groups SET status='superseded' WHERE id=?", (g["id"],))
@@ -128,7 +175,8 @@ def group_detail(db, group_id):
         (SELECT text FROM ocr_results WHERE page_id=p.id AND status='completed' ORDER BY created_at DESC LIMIT 1) AS ocr_snippet,
         (SELECT words_json FROM ocr_results WHERE page_id=p.id AND status='completed' ORDER BY created_at DESC LIMIT 1) AS ocr_words_json
         FROM group_pages gp JOIN pages p ON p.id=gp.page_id WHERE gp.group_id=? ORDER BY gp.sequence""", (group_id,))]
-    features = [extract(page["ocr_snippet"] or "", page["ocr_words_json"], page["width"], page["height"])
+    known_entities = _known_entities(db)
+    features = [extract(page["ocr_snippet"] or "", page["ocr_words_json"], page["width"], page["height"], known_entities)
                 for page in result["pages"]]
     result["metadata_json"] = _enrich_metadata(result["metadata_json"], features)
     return result
@@ -182,6 +230,13 @@ def override(db, source_id, action, payload):
             if field not in m: raise ValueError("metadata_field_invalid")
             m[field]["human_value"]={"value":payload["value"],"source":"human_override"}; m[field]["effective_value"]=m[field]["human_value"]
             db.execute("UPDATE document_groups SET metadata_json=?,status='review_required' WHERE id=?", (json.dumps(m),g["id"]))
+            if field == "supplier" and str(payload["value"]).strip():
+                supplier = str(payload["value"]).strip()
+                db.execute("""INSERT INTO learned_metadata_rules(field,normalized,value,source_group_id,created_at)
+                    VALUES(?,?,?,?,?) ON CONFLICT(field,normalized) DO NOTHING""",
+                           ("supplier", _norm_rule(supplier), supplier, g["id"], time.time()))
+            elif field == "invoice_number":
+                _remember_invoice_label(db, g["id"], payload["value"])
         elif action == "approve": db.execute("UPDATE document_groups SET status='approved' WHERE id=? AND source_file_id=?", (payload["group_id"],source_id))
         elif action == "needs_review": db.execute("UPDATE document_groups SET status='review_required' WHERE id=? AND source_file_id=?", (payload["group_id"],source_id))
         elif action == "split":

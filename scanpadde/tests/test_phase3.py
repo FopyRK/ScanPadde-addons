@@ -115,3 +115,18 @@ def test_group_detail_suggests_metadata_found_on_a_later_page(env):
     detail = group_detail(db, group_id)
     assert detail['metadata_json']['supplier']['effective_value']['value'] == 'ACME GmbH'
     assert detail['metadata_json']['invoice_number']['effective_value']['normalized'] == 'AB123'
+
+def test_confirmed_metadata_creates_local_reusable_rules(env):
+    _, db = env
+    first = source(db, 1)
+    page(db, first, 1, 'My Supplier\nVorgangsnummer: ZX-99')
+    group = reprocess_source(db, first)[0]
+    override(db, first, 'metadata', {'group_id': group, 'field': 'supplier', 'value': 'My Supplier'})
+    override(db, first, 'metadata', {'group_id': group, 'field': 'invoice_number', 'value': 'ZX-99'})
+    learned = db.execute("SELECT field,value FROM learned_metadata_rules ORDER BY field").fetchall()
+    assert [(row['field'], row['value']) for row in learned] == [('invoice_label', 'Vorgangsnummer'), ('supplier', 'My Supplier')]
+    later = source(db, 1)
+    page(db, later, 1, 'My Supplier\nVorgangsnummer: ZX-100')
+    detail = group_detail(db, reprocess_source(db, later)[0])
+    assert detail['metadata_json']['supplier']['effective_value']['value'] == 'My Supplier'
+    assert detail['metadata_json']['invoice_number']['effective_value']['normalized'] == 'ZX100'

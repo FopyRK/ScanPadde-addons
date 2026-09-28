@@ -17,7 +17,7 @@ from .config import load_ocr_config, load_ollama_config
 from .features import extract
 from .ollama import OllamaClient, OllamaError, _input_digest
 from .remote_ocr import RemoteOcrClient, RemoteOcrError
-from .segmentation import reprocess_source, group_detail, override, apply_ollama_suggestion
+from .segmentation import reprocess_source, group_detail, override, apply_ollama_suggestion, _known_entities
 from .handoff import export_handoff, import_handoff
 
 ASSETS = Path(__file__).parent
@@ -214,8 +214,9 @@ def create_app(paths=None, background=True, allow_test_client=False):
             raise HTTPException(404, "source_not_found")
         if len(page_rows) != expected["page_count"]:
             raise HTTPException(409, "ocr_incomplete")
+        known_entities = _known_entities(db)
         return [{"page_id": row["id"], "page_number": row["page_number"], "text": row["text"],
-                 "features": extract(row["text"], row["words_json"], row["width"], row["height"])} for row in page_rows]
+                 "features": extract(row["text"], row["words_json"], row["width"], row["height"], known_entities)} for row in page_rows]
 
     @app.get("/api/sources/{source_id}/ollama-suggestion")
     def ollama_suggestion(source_id: int):
