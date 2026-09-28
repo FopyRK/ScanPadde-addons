@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.18 — 2026-09-28
+
+- Use local page positions inside each bounded Ollama request, then map the
+  review-only suggestion safely back to the source pages.
+
 ## 0.1.17 — 2026-09-28
 
 - Split larger local Ollama grouping requests into bounded page chunks before

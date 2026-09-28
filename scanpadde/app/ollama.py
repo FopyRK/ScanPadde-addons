@@ -99,6 +99,11 @@ class OllamaClient:
 
     def _suggest_chunk(self, pages: list[dict]) -> list[dict]:
         summaries = [_page_summary(page) for page in pages]
+        # Each request is self-contained.  Use local page positions so the
+        # model never has to infer that a later chunk begins at (for example)
+        # page 13; translate the safe, contiguous result back afterwards.
+        for position, summary in enumerate(summaries, start=1):
+            summary["p"] = position
         prompt = (
             "Return JSON only: {\"starts\":[1,3]}. starts lists every first page of a contiguous document, "
             "including the first listed page. Add a start when supplier, document number, or page counter changes; "
@@ -132,4 +137,7 @@ class OllamaClient:
                 connection.close()
             except UnboundLocalError:
                 pass
-        return _validate_groups(parsed, [page["page_number"] for page in pages])
+        local_groups = _validate_groups(parsed, list(range(1, len(pages) + 1)))
+        return [{**group, "pages": [pages[position - 1]["page_number"]
+                                     for position in group["pages"]]}
+                for group in local_groups]
