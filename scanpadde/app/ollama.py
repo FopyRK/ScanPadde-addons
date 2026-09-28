@@ -21,7 +21,9 @@ class OllamaSuggestion:
 def _page_summary(page: dict) -> dict:
     features = page["features"]
     def values(key):
-        return [item.get("value", "")[:180] for item in features.get(key, [])[:3]]
+        # Feature candidates can themselves be long OCR fragments. One short
+        # best candidate is enough for a grouping hint from a small local model.
+        return [item.get("value", "")[:80] for item in features.get(key, [])[:1]]
     # The local model sees only the OCR required to distinguish this page.  Its
     # response never gets to retain any of this text in SQLite.
     return {
@@ -34,7 +36,7 @@ def _page_summary(page: dict) -> dict:
         # Keep the local-model prompt proportionate even for long scanner
         # batches.  The extracted candidates carry the primary identity
         # evidence; this short excerpt only provides limited layout context.
-        "ocr_excerpt": page["text"][:320],
+        "ocr_excerpt": page["text"][:120],
     }
 
 
@@ -97,7 +99,7 @@ class OllamaClient:
         try:
             connection = connection_type(target.hostname, target.port, timeout=self.config.connect_timeout)
             body = json.dumps({"model": self.config.model, "prompt": prompt, "stream": False,
-                               "format": "json", "options": {"temperature": 0, "num_predict": 512}}).encode("utf-8")
+                               "format": "json", "options": {"temperature": 0, "num_predict": 128}}).encode("utf-8")
             connection.request("POST", "/api/generate", body=body,
                                headers={"Content-Type": "application/json", "Content-Length": str(len(body))})
             # HTTPConnection's constructor timeout also governs response reads.

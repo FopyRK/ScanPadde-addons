@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.15 — 2026-09-28
+
+- Further compact the local Ollama page evidence and cap its structured response
+  so grouping remains usable on a small private-LAN model.
+
 ## 0.1.14 — 2026-09-28
 
 - Bound the local Ollama prompt to compact page evidence and its response to a

@@ -39,4 +39,4 @@ def test_client_keeps_only_structured_groups_and_no_model_prose(monkeypatch):
     result = OllamaClient(OllamaConfig(True, "http://192.168.10.168:11434", "qwen3")).suggest_groups(pages())
     assert result.groups == [{"pages": [1, 2], "confidence": "high", "reason": "same_document"}]
     assert "never stored" not in json.dumps(result.groups)
-    assert captured["body"]["options"]["num_predict"] == 512
+    assert captured["body"]["options"]["num_predict"] == 128
