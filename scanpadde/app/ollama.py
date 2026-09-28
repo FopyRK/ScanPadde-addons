@@ -97,6 +97,12 @@ class OllamaClient:
                                "format": "json", "options": {"temperature": 0}}).encode("utf-8")
             connection.request("POST", "/api/generate", body=body,
                                headers={"Content-Type": "application/json", "Content-Length": str(len(body))})
+            # HTTPConnection's constructor timeout also governs response reads.
+            # A local model can legitimately need longer than the short connect
+            # timeout, so preserve the fast connection failure while allowing the
+            # configured, bounded inference time for the response.
+            if connection.sock is not None:
+                connection.sock.settimeout(self.config.read_timeout)
             response = connection.getresponse()
             raw = response.read(200000)
             if response.status != 200:

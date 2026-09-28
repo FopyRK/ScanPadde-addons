@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.13 — 2026-09-28
+
+- Keep the short connection timeout for local Ollama while allowing the
+  separately bounded inference-response timeout.
+
 ## 0.1.12 — 2026-09-28
 
 - Preserve explicitly configured optional local-analysis settings when the
