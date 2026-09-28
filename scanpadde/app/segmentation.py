@@ -3,7 +3,7 @@ import json, time
 from .db import transaction
 from .features import extract, FEATURE_VERSION
 
-ALGORITHM_VERSION = "phase3-segmentation-v1"
+ALGORITHM_VERSION = "phase3-segmentation-v2"
 def _values(f, name): return {x["normalized"] for x in f.get(name, []) if x.get("normalized")}
 def _first(f, name): return (f.get(name) or [None])[0]
 
@@ -73,7 +73,19 @@ def reprocess_source(db, source_id):
         revision = (db.execute("SELECT COALESCE(MAX(revision),0)+1 FROM document_groups WHERE source_file_id=?", (source_id,)).fetchone()[0])
         starts, evidences = [0], []
         for i in range(len(rows)-1):
-            ev = boundary(features[i], features[i+1]); evidences.append(ev)
+            # Scanner duplex output frequently puts a blank reverse side
+            # between two content pages.  Compare the next content page to
+            # the preceding content page as well, so a new receipt number is
+            # not hidden by that blank separator.  The split still happens at
+            # the new content page, preserving the reverse side with the
+            # preceding document for review.
+            left_index = i
+            if features[i]["blankness"] != "content" and features[i + 1]["blankness"] == "content":
+                for previous in range(i - 1, -1, -1):
+                    if features[previous]["blankness"] == "content":
+                        left_index = previous
+                        break
+            ev = boundary(features[left_index], features[i+1]); evidences.append(ev)
             db.execute("INSERT OR REPLACE INTO boundary_evidence VALUES(?,?,?,?,?)", (source_id, rows[i]["id"], ALGORITHM_VERSION, json.dumps(ev), time.time()))
             if ev["decision"] == "split": starts.append(i+1)
         starts.append(len(rows))

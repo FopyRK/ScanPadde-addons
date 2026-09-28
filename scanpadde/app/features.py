@@ -50,12 +50,15 @@ def extract(text, words_json=None, width=None, height=None, known_entities=None)
             # Most extraction rules expose their value as capture group 1.
             # Keyword-presence rules such as VAT deliberately do not, so their
             # full match is the only safe, traceable candidate value.
-            value = match.group(1) if match.lastindex else match.group(0)
+            value = next((group for group in match.groups() if group is not None), match.group(0))
             result.append(_candidate(value, source, match.group(0),
                                      normalized=(normalizer(value) if normalizer else None)))
         return result
     invoices = matches(r"(?:rechnung(?:s)?\s*(?:nummer|nr\.?|no\.?)|invoice(?:\s*(?:no\.?|number))?)\s*[:#]?\s*([A-Z0-9][A-Z0-9 /_-]{2,})", "invoice_label", normalize_invoice)
-    docs = matches(r"(?:beleg(?:nummer|nr\.?)|document(?:\s*(?:no\.?|number))?)\s*[:#]?\s*([A-Z0-9][A-Z0-9 /_-]{2,})", "document_label", normalize_invoice)
+    # Retail OCR commonly misreads the final letters of ``Belegnummer`` and
+    # may put ``Belegdatum`` between its label and the numeric identifier.
+    # A long numeric token near that label remains clear, auditable evidence.
+    docs = matches(r"(?:beleg(?:nummer|num\w*|nr\.?)|document(?:\s*(?:no\.?|number))?)(?:\s*[:#]?\s*(?!belegdatum\b)([A-Z0-9][A-Z0-9 /_-]*\d[A-Z0-9 /_-]*)|[\s:;,.\-A-Za-zÄÖÜäöüß]{0,50}?(\d{6,}[A-Z0-9/_-]*))", "document_label", normalize_invoice)
     dates = matches(r"\b(\d{1,2}[.]\d{1,2}[.]\d{2,4}|\d{4}-\d{1,2}-\d{1,2})\b", "date")
     for m in re.finditer(r"\b(\d{1,2})\.?\s+(" + "|".join(MONTHS) + r")\s+(\d{4})\b", lowered, re.I):
         try: normalized = datetime(int(m.group(3)), MONTHS[m.group(2).lower()], int(m.group(1))).date().isoformat()

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.9 — 2026-09-28
+
+- Recognize common OCR variants of receipt-number labels and compare document identifiers across blank reverse sides.
+- Refresh proposed groups when the grouping algorithm changes; human review overrides remain authoritative.
+
 ## 0.1.8 — 2026-09-28
 
 - Treat labelled receipt/document numbers as document identity evidence during review grouping.

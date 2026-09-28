@@ -43,6 +43,10 @@ def test_boundary_uses_receipt_number_as_document_identity():
     assert evidence['decision'] == 'split'
     assert 'document_number_switch' in evidence['strong_for_split']
 
+def test_feature_extraction_accepts_ocr_variants_of_receipt_label():
+    features = extract('Belegnummeı: Belegdatum 2612810610077726')
+    assert features['document_number_candidates'][0]['normalized'] == '2612810610077726'
+
 def test_grouping_overrides_and_restart_persistence(env):
     _,db=env; sid=source(db,3); p1=page(db,sid,1,'ACME GmbH\nRechnung Nr: A1\nSeite 1 von 2'); p2=page(db,sid,2,'ACME GmbH\nRechnung Nr: A1\nSeite 2 von 2'); p3=page(db,sid,3,'BETA GmbH\nRechnung Nr: B2')
     ids=reprocess_source(db,sid); assert len(ids)==2
