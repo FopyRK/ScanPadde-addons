@@ -198,6 +198,36 @@ def create_app(paths=None, background=True, allow_test_client=False):
         with connection(runtime.db_path) as db:
             return {"group_ids": reprocess_source(db, source_id)}
 
+    @app.post("/api/sources/{source_id}/retry-ocr")
+    def retry_source_ocr(source_id: int):
+        """Queue only pages missing a completed OCR cache entry.
+
+        This is for sources that entered the archive before remote OCR was
+        configured.  It deliberately refuses to use a local fallback and
+        keeps existing OCR cache entries untouched.
+        """
+        if runtime.ocr_config.backend != "remote":
+            raise HTTPException(409, "remote_ocr_required")
+        with connection(runtime.db_path) as db:
+            source = db.execute("SELECT id FROM source_files WHERE id=?", (source_id,)).fetchone()
+            if not source:
+                raise HTTPException(404, "source_not_found")
+            pages = db.execute("SELECT id,rendered_path,image_sha256 FROM pages WHERE source_file_id=?", (source_id,)).fetchall()
+            queued = 0
+            for page in pages:
+                cached = page["image_sha256"] and db.execute(
+                    "SELECT 1 FROM ocr_results WHERE page_id=? AND image_sha256=? AND status='completed' LIMIT 1",
+                    (page["id"], page["image_sha256"])).fetchone()
+                if cached:
+                    db.execute("UPDATE pages SET status='ocr_completed' WHERE id=?", (page["id"],))
+                    continue
+                if page["rendered_path"] and page["image_sha256"]:
+                    jobs.enqueue(db, f"manual-ocr:{page['id']}:{page['image_sha256']}", "ocr_page", page["id"], {"page_id": page["id"]})
+                else:
+                    jobs.enqueue(db, f"manual-render:{page['id']}", "render_page", page["id"], {"page_id": page["id"]})
+                queued += 1
+            return {"queued_pages": queued, "backend": "remote"}
+
     @app.get("/api/sources/{source_id}/groups")
     def source_groups(source_id: int):
         if not rows("SELECT id FROM source_files WHERE id=?", (source_id,)):
@@ -308,7 +338,9 @@ def create_app(paths=None, background=True, allow_test_client=False):
             r["id"], r["original_filename"], r["sha256"][:12], r["page_count"],
             r["status"], f"OCR {ocr_done.get(r['id'], 0)} / {r['page_count']}", __import__("datetime").datetime.fromtimestamp(r["first_seen_at"],
             __import__("datetime").timezone.utc).isoformat())) +
-            f'<td><a href="review/{r["id"]}">Analyse &amp; Review</a></td></tr>' for r in sources())
+            (f'<td><form action="api/sources/{r["id"]}/retry-ocr" method="post"><button type="submit">OCR nachholen</button></form> '
+             if ocr_done.get(r["id"], 0) < r["page_count"] else '<td>') +
+            f'<a href="review/{r["id"]}">Analyse &amp; Review</a></td></tr>' for r in sources())
         template = (ASSETS / "templates/index.html").read_text(encoding="utf-8")
         return template.replace("{{version}}", VERSION).replace("{{health}}", escape(
             f"System: {s['app']} | Datenbank: {s['database']} | Arbeitsverzeichnis: {s['workspace']} | Worker: {s['worker']} | Remote OCR: {s['remote_ocr']['backend']} / {s['remote_ocr']['online']}")).replace(

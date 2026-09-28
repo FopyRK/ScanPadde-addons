@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.10 — 2026-09-28
+
+- Add a remote-only, cache-aware “OCR nachholen” action for sources archived before OCR was configured.
+
 ## 0.1.9 — 2026-09-28
 
 - Recognize common OCR variants of receipt-number labels and compare document identifiers across blank reverse sides.

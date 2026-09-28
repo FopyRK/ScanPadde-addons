@@ -1,2 +1,2 @@
 """ScanPadde V2: offline structural intake."""
-VERSION = "0.1.9"
+VERSION = "0.1.10"
