@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.17 — 2026-09-28
+
+- Split larger local Ollama grouping requests into bounded page chunks before
+  joining their ordered, review-only suggestions.
+
 ## 0.1.16 — 2026-09-28
 
 - Use a compact local-model start-page proposal built from extracted OCR

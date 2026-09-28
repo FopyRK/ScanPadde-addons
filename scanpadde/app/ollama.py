@@ -87,6 +87,17 @@ class OllamaClient:
     def suggest_groups(self, pages: list[dict]) -> OllamaSuggestion:
         if not pages:
             raise OllamaError("no_ocr_pages")
+        # Small local models can answer compact page-start prompts reliably,
+        # but a whole scanner batch can still make one inference exceed the
+        # bounded response time.  Keep every request independently useful and
+        # join the ordered, contiguous partitions afterwards.
+        chunk_size = 12
+        groups: list[dict] = []
+        for start in range(0, len(pages), chunk_size):
+            groups.extend(self._suggest_chunk(pages[start:start + chunk_size]))
+        return OllamaSuggestion(groups=groups, input_digest=_input_digest(pages, self.config.model))
+
+    def _suggest_chunk(self, pages: list[dict]) -> list[dict]:
         summaries = [_page_summary(page) for page in pages]
         prompt = (
             "Return JSON only: {\"starts\":[1,3]}. starts lists every first page of a contiguous document, "
@@ -121,5 +132,4 @@ class OllamaClient:
                 connection.close()
             except UnboundLocalError:
                 pass
-        groups = _validate_groups(parsed, [page["page_number"] for page in pages])
-        return OllamaSuggestion(groups=groups, input_digest=_input_digest(pages, self.config.model))
+        return _validate_groups(parsed, [page["page_number"] for page in pages])

@@ -46,3 +46,18 @@ def test_client_keeps_only_structured_groups_and_no_model_prose(monkeypatch):
     result = OllamaClient(OllamaConfig(True, "http://192.168.10.168:11434", "qwen3")).suggest_groups(pages())
     assert result.groups == [{"pages": [1, 2], "confidence": "low", "reason": "uncertain"}]
     assert captured["body"]["options"]["num_predict"] == 64
+
+
+def test_client_chunks_large_batches(monkeypatch):
+    calls = []
+
+    def suggest_chunk(_, chunk):
+        calls.append([page["page_number"] for page in chunk])
+        return [{"pages": calls[-1], "confidence": "low", "reason": "uncertain"}]
+
+    monkeypatch.setattr(OllamaClient, "_suggest_chunk", suggest_chunk)
+    many_pages = [{"page_number": number, "features": pages()[0]["features"]}
+                  for number in range(1, 15)]
+    result = OllamaClient(OllamaConfig(True, "http://local", "model")).suggest_groups(many_pages)
+    assert len(calls) == 2
+    assert [group["pages"] for group in result.groups] == [list(range(1, 13)), [13, 14]]
