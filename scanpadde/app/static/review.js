@@ -6,6 +6,18 @@
   const esc = value => String(value ?? '—').replace(/[&<>]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[char]));
   const metadataFields = [['supplier', 'Lieferant'], ['invoice_number', 'Rechnungsnr.'], ['document_type', 'Dokumenttyp']];
   const statusText = {proposed: 'vorgeschlagen', review_required: 'Prüfung erforderlich', approved: 'freigegeben', rejected: 'verworfen'};
+  const preview = document.createElement('dialog');
+  preview.className = 'seitenvorschau';
+  preview.innerHTML = '<button class="seitenvorschau-schliessen" type="button">Schließen</button><p class="seitenvorschau-titel"></p><img alt="Vergrößerte Dokumentseite">';
+  document.body.append(preview);
+  preview.querySelector('button').onclick = () => preview.close();
+  preview.addEventListener('click', event => { if (event.target === preview) preview.close(); });
+
+  function showPreview(page) {
+    preview.querySelector('.seitenvorschau-titel').textContent = `Seite ${page.page_number}`;
+    preview.querySelector('img').src = `../api/pages/${page.id}/thumbnail`;
+    preview.showModal();
+  }
 
   async function call(path, method, body) {
     const response = await fetch(path, {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
@@ -35,6 +47,12 @@
       }).join('');
       card.innerHTML = `<h2>Gruppe ${group.id} · <span class="group-status">${esc(statusText[group.status] || group.status)}</span></h2><p class="pages">${detail.pages.map(page => `Seite ${page.page_number}`).join(', ')}</p><div class="page-cards">${pageCards}</div><p class="metadata">Lieferant: <span data-field="supplier">${esc(metadata.supplier.effective_value?.value)}</span> · Rechnungsnr.: <span data-field="invoice_number">${esc(metadata.invoice_number.effective_value?.value)}</span> · Typ: <span data-field="document_type">${esc(metadata.document_type.effective_value?.value)}</span></p>${boundaries}<button data-a="split">Vor Seite trennen …</button> <button data-a="merge">Mit vorheriger Gruppe zusammenführen</button> <button data-a="move">Seite verschieben …</button> ${metadataFields.map(([field, label]) => `<button data-a="edit" data-field="${field}">${label} bearbeiten</button>`).join(' ')} <button data-a="approve">Gruppe freigeben</button> <button data-a="review">Prüfung erforderlich markieren</button>`;
       card.onclick = async event => {
+        const pageCard = event.target.closest('.page-card');
+        if (pageCard) {
+          const page = detail.pages.find(item => item.id === Number(pageCard.dataset.pageId));
+          if (page) showPreview(page);
+          return;
+        }
         const action = event.target.dataset.a;
         if (!action) return;
         try {

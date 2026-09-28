@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.22 — 2026-09-28
+
+- Open each review-page preview in a readable, closable full-page overlay
+  without reloading the review or changing any document data.
+
 ## 0.1.21 — 2026-09-28
 
 - Translate all review controls, statuses, prompts, and page action labels to
